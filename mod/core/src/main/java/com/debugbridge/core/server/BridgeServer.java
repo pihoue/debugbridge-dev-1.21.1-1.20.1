@@ -5,6 +5,20 @@ import com.debugbridge.core.lua.ThreadDispatcher;
 import com.debugbridge.core.mapping.MappingResolver;
 import com.debugbridge.core.protocol.BridgeRequest;
 import com.debugbridge.core.protocol.BridgeResponse;
+import com.debugbridge.core.protocol.dto.BlockDetailsDto;
+import com.debugbridge.core.protocol.dto.BlockSummaryDto;
+import com.debugbridge.core.protocol.dto.ChatHistoryDto;
+import com.debugbridge.core.protocol.dto.ChatMessageDto;
+import com.debugbridge.core.protocol.dto.EntityDetailsDto;
+import com.debugbridge.core.protocol.dto.EntitySummaryDto;
+import com.debugbridge.core.protocol.dto.LookedAtEntityDto;
+import com.debugbridge.core.protocol.dto.NearbyBlocksDto;
+import com.debugbridge.core.protocol.dto.NearbyEntitiesDto;
+import com.debugbridge.core.protocol.dto.ScreenInspectDto;
+import com.debugbridge.core.protocol.dto.SearchResultDto;
+import com.debugbridge.core.protocol.dto.SlotDto;
+import com.debugbridge.core.protocol.dto.SnapshotDto;
+import com.debugbridge.core.protocol.dto.StatusDto;
 import com.debugbridge.core.refs.ObjectRefStore;
 import com.debugbridge.core.entity.ClientEntityGlowManager;
 import com.debugbridge.core.entity.LookedAtEntityProvider;
@@ -23,12 +37,15 @@ import org.java_websocket.server.WebSocketServer;
 
 import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * WebSocket server that accepts Lua script execution requests and other commands.
@@ -36,7 +53,15 @@ import java.util.regex.Pattern;
  */
 public class BridgeServer extends WebSocketServer {
     private static final Logger LOG = Logger.getLogger("DebugBridge");
+    /** Default serializer: nulls become {@code "field": null} on the wire.
+     * Used for endpoints whose schema treats null as a meaningful value
+     * (e.g. {@code lookedAtEntity.entityId}). */
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
+    /** Omit-nulls serializer: null fields disappear from the JSON entirely.
+     * Used for endpoints with conditional fields (e.g. {@code status} only
+     * emits {@code gameDir}/{@code logsDir}/etc. when the host mod has set a
+     * game directory). */
+    private static final Gson GSON_OMIT_NULLS = new Gson();
 
     private final LuaRuntime lua;
     private final MappingResolver resolver;
@@ -52,10 +77,6 @@ public class BridgeServer extends WebSocketServer {
      */
     private volatile Path gameDir;
 
-    /**
-     * Runtime logger injection service. Defaults to UNAVAILABLE until the
-     * agent module registers itself.
-     */
     /**
      * Item texture resolver. Set by the version-specific module.
      */
@@ -299,21 +320,34 @@ public class BridgeServer extends WebSocketServer {
     }
 
     private BridgeResponse handleSearch(BridgeRequest req) {
+        if (req.payload == null || !req.payload.has("pattern")
+                || !req.payload.get("pattern").isJsonPrimitive()) {
+            return BridgeResponse.error(req.id, "search: 'pattern' must be a string");
+        }
         String pattern = req.payload.get("pattern").getAsString();
+        if (pattern.length() > MAX_PATTERN_LEN) {
+            return BridgeResponse.error(req.id,
+                "search: pattern too long (max " + MAX_PATTERN_LEN + " chars)");
+        }
         String scope = req.payload.has("scope")
             ? req.payload.get("scope").getAsString() : "all";
-        Pattern regex = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE);
+        Pattern regex;
+        try {
+            regex = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE);
+        } catch (PatternSyntaxException e) {
+            return BridgeResponse.error(req.id, "search: invalid regex — " + e.getDescription());
+        }
 
-        JsonArray results = new JsonArray();
+        List<SearchResultDto> results = new java.util.ArrayList<>();
         int limit = 100;
 
         if (scope.equals("class") || scope.equals("all")) {
             for (String mojangClass : resolver.getAllClassNames()) {
-                if (regex.matcher(mojangClass).find()) {
-                    JsonObject entry = new JsonObject();
-                    entry.addProperty("type", "class");
-                    entry.addProperty("name", mojangClass);
-                    results.add(entry);
+                if (timedFind(regex, mojangClass)) {
+                    SearchResultDto r = new SearchResultDto();
+                    r.type = "class";
+                    r.name = mojangClass;
+                    results.add(r);
                     if (results.size() >= limit) break;
                 }
             }
@@ -322,12 +356,12 @@ public class BridgeServer extends WebSocketServer {
         if (results.size() < limit && (scope.equals("method") || scope.equals("all"))) {
             for (String className : resolver.getAllClassNames()) {
                 for (String methodSig : resolver.getMethodSignatures(className)) {
-                    if (regex.matcher(methodSig).find()) {
-                        JsonObject entry = new JsonObject();
-                        entry.addProperty("type", "method");
-                        entry.addProperty("owner", className);
-                        entry.addProperty("name", methodSig);
-                        results.add(entry);
+                    if (timedFind(regex, methodSig)) {
+                        SearchResultDto r = new SearchResultDto();
+                        r.type = "method";
+                        r.owner = className;
+                        r.name = methodSig;
+                        results.add(r);
                         if (results.size() >= limit) break;
                     }
                 }
@@ -338,12 +372,12 @@ public class BridgeServer extends WebSocketServer {
         if (results.size() < limit && (scope.equals("field") || scope.equals("all"))) {
             for (String className : resolver.getAllClassNames()) {
                 for (String fieldName : resolver.getFieldNames(className)) {
-                    if (regex.matcher(fieldName).find()) {
-                        JsonObject entry = new JsonObject();
-                        entry.addProperty("type", "field");
-                        entry.addProperty("owner", className);
-                        entry.addProperty("name", fieldName);
-                        results.add(entry);
+                    if (timedFind(regex, fieldName)) {
+                        SearchResultDto r = new SearchResultDto();
+                        r.type = "field";
+                        r.owner = className;
+                        r.name = fieldName;
+                        results.add(r);
                         if (results.size() >= limit) break;
                     }
                 }
@@ -351,7 +385,60 @@ public class BridgeServer extends WebSocketServer {
             }
         }
 
-        return BridgeResponse.success(req.id, results, null);
+        // Wire shape is a bare array (no wrapper). Gson serializes
+        // `List<SearchResultDto>` directly to a JsonArray.
+        return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(results), null);
+    }
+
+    /** Hard cap on `search` pattern length. Class/method names are tiny; very
+     * long patterns are either pathological compilation work or an error. */
+    private static final int MAX_PATTERN_LEN = 256;
+
+    /** Per-string match deadline for `search`. Catastrophic backtracking on a
+     * single string still has to read its way through the input via
+     * {@link CharSequence#charAt}, so a deadline checked there bounds the
+     * worst case at ~{@value} ms regardless of pattern shape. */
+    private static final long REGEX_MATCH_TIMEOUT_MS = 100L;
+
+    /** Run {@code regex.matcher(target).find()} with a per-call deadline that
+     * defuses catastrophic-backtracking ReDoS. Returns {@code false} on timeout
+     * (treats a timing-out pattern as no-match for that string and moves on
+     * — better than hanging the websocket handler thread). */
+    private static boolean timedFind(Pattern regex, String target) {
+        try {
+            long deadline = System.nanoTime() + REGEX_MATCH_TIMEOUT_MS * 1_000_000L;
+            return regex.matcher(new TimeoutCharSequence(target, deadline)).find();
+        } catch (RegexTimeoutException e) {
+            return false;
+        }
+    }
+
+    /** Throws a {@link RegexTimeoutException} from {@link #charAt(int)} once
+     * the deadline passes. Java's regex engine reads input via {@code charAt},
+     * so this gives the matcher a back-pressure signal even when it's looping
+     * inside a backtracking blowup. */
+    private static final class TimeoutCharSequence implements CharSequence {
+        private final CharSequence inner;
+        private final long deadlineNanos;
+        TimeoutCharSequence(CharSequence inner, long deadlineNanos) {
+            this.inner = inner;
+            this.deadlineNanos = deadlineNanos;
+        }
+        @Override public int length() { return inner.length(); }
+        @Override public char charAt(int index) {
+            if (System.nanoTime() > deadlineNanos) {
+                throw new RegexTimeoutException();
+            }
+            return inner.charAt(index);
+        }
+        @Override public CharSequence subSequence(int start, int end) {
+            return new TimeoutCharSequence(inner.subSequence(start, end), deadlineNanos);
+        }
+        @Override public String toString() { return inner.toString(); }
+    }
+
+    private static final class RegexTimeoutException extends RuntimeException {
+        RegexTimeoutException() { super(null, null, false, false); }
     }
 
     private BridgeResponse handleScreenshot(BridgeRequest req) {
@@ -394,22 +481,28 @@ public class BridgeServer extends WebSocketServer {
                 "No game state provider configured. Use mc_execute with Lua instead.");
         }
         try {
-            JsonObject snapshot = stateProvider.captureSnapshot();
-            // Map intermediary class names on any nested entity-type fields.
-            unresolveClassField(snapshot.has("player") && snapshot.get("player").isJsonObject()
-                ? snapshot.getAsJsonObject("player").getAsJsonObject("vehicle") : null, "type");
-            unresolveClassField(snapshot.getAsJsonObject("target"), "entityType");
-            return BridgeResponse.success(req.id, snapshot, null);
+            SnapshotDto snapshot = stateProvider.captureSnapshot();
+            // Class-name mapping on the two nested entity-type fields.
+            if (snapshot.player != null && snapshot.player.vehicle != null) {
+                snapshot.player.vehicle.type = unresolveOrNull(snapshot.player.vehicle.type);
+            }
+            if (snapshot.target != null) {
+                snapshot.target.entityType = unresolveOrNull(snapshot.target.entityType);
+            }
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(snapshot), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Snapshot failed: " + e.getMessage());
         }
     }
 
-    private void unresolveClassField(JsonObject obj, String field) {
-        if (obj == null || !obj.has(field)) return;
-        String mapped = resolver.unresolveClass(obj.get(field).getAsString());
-        if (mapped != null) obj.addProperty(field, mapped);
+    /** Apply {@link MappingResolver#unresolveClass} to a raw runtime class
+     * name. Returns the original value when the resolver doesn't know the
+     * mapping (preserves prior behavior where unmapped names pass through). */
+    private String unresolveOrNull(String runtimeName) {
+        if (runtimeName == null) return null;
+        String mapped = resolver.unresolveClass(runtimeName);
+        return mapped != null ? mapped : runtimeName;
     }
 
     /**
@@ -439,26 +532,47 @@ public class BridgeServer extends WebSocketServer {
     }
 
     private BridgeResponse handleRunCommand(BridgeRequest req) {
+        if (req.payload == null || !req.payload.has("command")
+                || !req.payload.get("command").isJsonPrimitive()) {
+            return BridgeResponse.error(req.id, "runCommand: 'command' must be a string");
+        }
         String command = req.payload.get("command").getAsString();
-        // This needs to be implemented via the version-specific module
-        // For now, execute via Lua
-        String luaCode = String.format(
+        if (command.length() > MAX_COMMAND_LEN) {
+            return BridgeResponse.error(req.id,
+                "runCommand: command too long (max " + MAX_COMMAND_LEN + " chars)");
+        }
+        // SECURITY: encode the command as `string.char(b1, b2, ...)` so the
+        // generated Lua source contains no user-controlled bytes. Earlier
+        // single-quote escaping ('"' -> "\\'") was bypassable via backslash +
+        // quote, newlines, and null bytes. This formulation is unconditionally
+        // injection-proof: every byte of the user's command lands as a numeric
+        // literal, and Lua reassembles the string at runtime.
+        // This is a temporary measure — the long-term fix is a native
+        // CommandProvider that bypasses Lua entirely (see review queue).
+        byte[] cmdBytes = command.getBytes(StandardCharsets.UTF_8);
+        StringBuilder bytes = new StringBuilder(cmdBytes.length * 4);
+        for (int i = 0; i < cmdBytes.length; i++) {
+            if (i > 0) bytes.append(',');
+            bytes.append(cmdBytes[i] & 0xFF);
+        }
+        String luaCode =
+            "local cmd = string.char(" + bytes + ")\n" +
             "local mc = java.import('net.minecraft.client.Minecraft'):getInstance()\n" +
-            "mc.player:connection():sendCommand('%s')\n" +
-            "return 'Command sent: %s'",
-            command.replace("'", "\\'"),
-            command.replace("'", "\\'")
-        );
+            "mc.player:connection():sendCommand(cmd)\n" +
+            "return 'Command sent: ' .. cmd";
         return handleExecute(new BridgeRequest(req.id, "execute",
             createPayload("code", luaCode)));
     }
 
+    /** Hard cap on `runCommand` input length. */
+    private static final int MAX_COMMAND_LEN = 1024;
+
     private BridgeResponse handleStatus(BridgeRequest req) {
-        JsonObject status = new JsonObject();
-        status.addProperty("version", resolver.getVersion());
-        status.addProperty("mappingStatus", resolver.isObfuscated() ? "mojang" : "passthrough");
-        status.addProperty("obfuscated", resolver.isObfuscated());
-        status.addProperty("refs", refs.size());
+        StatusDto dto = new StatusDto();
+        dto.version = resolver.getVersion();
+        dto.mappingStatus = resolver.isObfuscated() ? "mojang" : "passthrough";
+        dto.obfuscated = resolver.isObfuscated();
+        dto.refs = refs.size();
 
         // Expose the game dir and log paths so a connecting client can read the
         // log via its own file-read tools. We always expose the path we *would*
@@ -470,15 +584,15 @@ public class BridgeServer extends WebSocketServer {
             Path logsDir = dir.resolve("logs");
             Path latest = logsDir.resolve("latest.log");
             Path debug = logsDir.resolve("debug.log");
-            status.addProperty("gameDir", dir.toAbsolutePath().toString());
-            status.addProperty("logsDir", logsDir.toAbsolutePath().toString());
-            status.addProperty("latestLog", latest.toAbsolutePath().toString());
-            status.addProperty("latestLogExists", Files.exists(latest));
-            status.addProperty("debugLog", debug.toAbsolutePath().toString());
-            status.addProperty("debugLogExists", Files.exists(debug));
+            dto.gameDir = dir.toAbsolutePath().toString();
+            dto.logsDir = logsDir.toAbsolutePath().toString();
+            dto.latestLog = latest.toAbsolutePath().toString();
+            dto.latestLogExists = Files.exists(latest);
+            dto.debugLog = debug.toAbsolutePath().toString();
+            dto.debugLogExists = Files.exists(debug);
         }
 
-        return BridgeResponse.success(req.id, status, null);
+        return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(dto), null);
     }
 
     private JsonObject createPayload(String key, String value) {
@@ -566,31 +680,22 @@ public class BridgeServer extends WebSocketServer {
         boolean includeIcons = req.payload.has("includeIcons")
             && req.payload.get("includeIcons").getAsBoolean();
         try {
-            JsonArray entities = entitiesProvider.getNearbyEntities(range, limit);
-            // Map intermediary class names to Mojang names
-            for (int i = 0; i < entities.size(); i++) {
-                JsonObject obj = entities.get(i).getAsJsonObject();
-                if (obj.has("type")) {
-                    String mapped = resolver.unresolveClass(obj.get("type").getAsString());
-                    if (mapped != null) obj.addProperty("type", mapped);
-                }
+            List<EntitySummaryDto> entities = entitiesProvider.getNearbyEntities(range, limit);
+            // Map runtime entity class names to Mojang names.
+            for (EntitySummaryDto e : entities) {
+                e.type = unresolveOrNull(e.type);
             }
-            JsonObject result = new JsonObject();
-            result.add("entities", entities);
-            result.addProperty("count", entities.size());
-
+            NearbyEntitiesDto dto = new NearbyEntitiesDto(entities);
             if (includeIcons) {
                 java.util.Set<String> uniqueIds = new java.util.LinkedHashSet<>();
-                for (int i = 0; i < entities.size(); i++) {
-                    JsonObject obj = entities.get(i).getAsJsonObject();
-                    if (obj.has("primaryEquipment")) {
-                        JsonObject eq = obj.getAsJsonObject("primaryEquipment");
-                        if (eq.has("itemId")) uniqueIds.add(eq.get("itemId").getAsString());
+                for (EntitySummaryDto e : entities) {
+                    if (e.primaryEquipment != null && e.primaryEquipment.itemId != null) {
+                        uniqueIds.add(e.primaryEquipment.itemId);
                     }
                 }
-                result.add("icons", renderIconsMap(uniqueIds));
+                dto.icons = renderIconsMap(uniqueIds);
             }
-            return BridgeResponse.success(req.id, result, null);
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(dto), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Nearby entities query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -605,32 +710,20 @@ public class BridgeServer extends WebSocketServer {
 
         int entityId = req.payload.get("entityId").getAsInt();
         try {
-            JsonObject details = entitiesProvider.getEntityDetails(entityId);
+            EntityDetailsDto details = entitiesProvider.getEntityDetails(entityId);
             if (details == null) {
-                JsonObject gone = new JsonObject();
-                gone.addProperty("gone", true);
-                return BridgeResponse.success(req.id, gone, null);
+                return BridgeResponse.success(req.id,
+                    GSON_OMIT_NULLS.toJsonTree(EntityDetailsDto.gone()), null);
             }
-            // Map intermediary class names to Mojang names
-            if (details.has("type")) {
-                String mapped = resolver.unresolveClass(details.get("type").getAsString());
-                if (mapped != null) details.addProperty("type", mapped);
+            // Apply class-name mapping uniformly: type, vehicle, and each passenger.
+            details.type = unresolveOrNull(details.type);
+            details.vehicle = unresolveOrNull(details.vehicle);
+            if (details.passengers != null) {
+                List<String> mapped = new java.util.ArrayList<>(details.passengers.size());
+                for (String p : details.passengers) mapped.add(unresolveOrNull(p));
+                details.passengers = mapped;
             }
-            if (details.has("vehicle")) {
-                String mapped = resolver.unresolveClass(details.get("vehicle").getAsString());
-                if (mapped != null) details.addProperty("vehicle", mapped);
-            }
-            if (details.has("passengers")) {
-                JsonArray passengers = details.getAsJsonArray("passengers");
-                JsonArray mapped = new JsonArray();
-                for (int i = 0; i < passengers.size(); i++) {
-                    String original = passengers.get(i).getAsString();
-                    String m = resolver.unresolveClass(original);
-                    mapped.add(m != null ? m : original);
-                }
-                details.add("passengers", mapped);
-            }
-            return BridgeResponse.success(req.id, details, null);
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(details), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Entity details query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -648,18 +741,13 @@ public class BridgeServer extends WebSocketServer {
         double range = req.payload.has("range") ? req.payload.get("range").getAsDouble() : 16.0;
         int limit = req.payload.has("limit") ? req.payload.get("limit").getAsInt() : 100;
         try {
-            JsonArray blocks = blocksProvider.getNearbyBlocks(range, limit);
-            for (int i = 0; i < blocks.size(); i++) {
-                JsonObject obj = blocks.get(i).getAsJsonObject();
-                if (obj.has("type")) {
-                    String mapped = resolver.unresolveClass(obj.get("type").getAsString());
-                    if (mapped != null) obj.addProperty("type", mapped);
-                }
+            List<BlockSummaryDto> blocks = blocksProvider.getNearbyBlocks(range, limit);
+            // Map each runtime BlockEntity class name to the Mojang name.
+            for (BlockSummaryDto b : blocks) {
+                b.type = unresolveOrNull(b.type);
             }
-            JsonObject result = new JsonObject();
-            result.add("blocks", blocks);
-            result.addProperty("count", blocks.size());
-            return BridgeResponse.success(req.id, result, null);
+            return BridgeResponse.success(req.id,
+                GSON_OMIT_NULLS.toJsonTree(new NearbyBlocksDto(blocks)), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Nearby blocks query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -676,17 +764,15 @@ public class BridgeServer extends WebSocketServer {
         int y = req.payload.get("y").getAsInt();
         int z = req.payload.get("z").getAsInt();
         try {
-            JsonObject details = blocksProvider.getBlockDetails(x, y, z);
+            BlockDetailsDto details = blocksProvider.getBlockDetails(x, y, z);
             if (details == null) {
-                JsonObject gone = new JsonObject();
-                gone.addProperty("gone", true);
-                return BridgeResponse.success(req.id, gone, null);
+                // Provider signals "no block entity" via null; the wire shape
+                // for that case is `{gone: true}`.
+                return BridgeResponse.success(req.id,
+                    GSON_OMIT_NULLS.toJsonTree(BlockDetailsDto.gone()), null);
             }
-            if (details.has("type")) {
-                String mapped = resolver.unresolveClass(details.get("type").getAsString());
-                if (mapped != null) details.addProperty("type", mapped);
-            }
-            return BridgeResponse.success(req.id, details, null);
+            details.type = unresolveOrNull(details.type);
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(details), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Block details query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -701,14 +787,12 @@ public class BridgeServer extends WebSocketServer {
         double range = (req.payload != null && req.payload.has("range"))
             ? req.payload.get("range").getAsDouble() : 64.0;
         try {
-            Integer id = lookedAtEntityProvider.getLookedAtEntity(range);
-            JsonObject result = new JsonObject();
-            if (id != null) {
-                result.addProperty("entityId", id);
-            } else {
-                result.add("entityId", JsonNull.INSTANCE);
-            }
-            return BridgeResponse.success(req.id, result, null);
+            LookedAtEntityDto dto =
+                new LookedAtEntityDto(lookedAtEntityProvider.getLookedAtEntity(range));
+            // GSON (serializeNulls=true) so absent-target emits `entityId: null`
+            // explicitly — clients distinguish "no target" from a malformed
+            // response by the key being present.
+            return BridgeResponse.success(req.id, GSON.toJsonTree(dto), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Looked-at entity query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -725,11 +809,12 @@ public class BridgeServer extends WebSocketServer {
         boolean includeJson = req.payload != null && req.payload.has("includeJson")
             && req.payload.get("includeJson").getAsBoolean();
         try {
-            JsonArray messages = chatHistoryProvider.getRecentMessages(limit, resolver, includeJson);
-            JsonObject result = new JsonObject();
-            result.add("messages", messages);
-            result.addProperty("count", messages.size());
-            return BridgeResponse.success(req.id, result, null);
+            List<ChatMessageDto> messages =
+                chatHistoryProvider.getRecentMessages(limit, resolver, includeJson);
+            ChatHistoryDto dto = new ChatHistoryDto(messages);
+            // Omit-nulls so per-message optional fields (addedTime, json) drop
+            // out when not populated, preserving the historical wire shape.
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(dto), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Chat history query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
@@ -744,26 +829,30 @@ public class BridgeServer extends WebSocketServer {
         boolean includeIcons = req.payload != null && req.payload.has("includeIcons")
             && req.payload.get("includeIcons").getAsBoolean();
         try {
-            JsonObject result = screenInspectProvider.inspectCurrentScreen();
-            // Map any class-name fields through the resolver so callers see Mojang names.
-            unresolveClassField(result, "type");
-            unresolveClassField(result, "menuClass");
+            ScreenInspectDto dto = screenInspectProvider.inspectCurrentScreen();
+            // Map runtime class names → Mojang names. Provider populates the
+            // raw `getClass().getName()` strings; the kernel applies the
+            // resolver here so each version impl stays free of mapping logic.
+            // Closes review.md Theme 1 (`slots[].container` was previously not
+            // mapped — both versions emitted `class_1277` / `class_1661`).
+            dto.type = unresolveOrNull(dto.type);
+            dto.menuClass = unresolveOrNull(dto.menuClass);
+            if (dto.slots != null) {
+                for (SlotDto slot : dto.slots) {
+                    slot.container = unresolveOrNull(slot.container);
+                }
+            }
 
-            if (includeIcons && result.has("slots")) {
+            if (includeIcons && dto.slots != null) {
                 java.util.Set<String> uniqueIds = new java.util.LinkedHashSet<>();
-                JsonArray slots = result.getAsJsonArray("slots");
-                for (int i = 0; i < slots.size(); i++) {
-                    JsonObject slot = slots.get(i).getAsJsonObject();
-                    if (slot.has("item")) {
-                        JsonObject item = slot.getAsJsonObject("item");
-                        if (item.has("itemId")) {
-                            uniqueIds.add(item.get("itemId").getAsString());
-                        }
+                for (SlotDto slot : dto.slots) {
+                    if (slot.item != null && slot.item.itemId != null) {
+                        uniqueIds.add(slot.item.itemId);
                     }
                 }
-                result.add("icons", renderIconsMap(uniqueIds));
+                dto.icons = renderIconsMap(uniqueIds);
             }
-            return BridgeResponse.success(req.id, result, null);
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(dto), null);
         } catch (Exception e) {
             return BridgeResponse.error(req.id,
                 "Screen inspect failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());

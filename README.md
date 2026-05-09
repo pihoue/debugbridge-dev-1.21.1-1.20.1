@@ -83,7 +83,7 @@ The web UI connects directly to the WebSocket server — no MCP layer required.
 |  DebugBridge Mod [THIS REPO]      |
 |  +-----------------------------+  |
 |  | BridgeServer (WebSocket)    |  |
-|  | Native endpoints (18 total) |  |
+|  | Native endpoints + execute  |  |
 |  | Lua runtime + Java bridge   |  |
 |  | Mojang mapping resolver     |  |
 |  +-----------------------------+  |
@@ -138,13 +138,50 @@ npm run dev          # dev server at http://localhost:5173
 npm run build        # production build → web-ui/dist/
 ```
 
+## Testing
+
+Three layers, automated where it pays off:
+
+**1. Core unit tests** — pure JVM, no Minecraft. Runs every PR via `.github/workflows/build.yml`.
+
+```bash
+cd mod
+JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ./gradlew :core:test
+```
+
+Covers the Lua bridge runtime, mapping resolver kernel (with stubbed Fabric SPI), and wire-contract tests for every endpoint (using stub providers).
+
+**2. Smoke test against a live mod** — `tools/smoke-test.mjs`. Connects via WebSocket, hits each kernel-candidate endpoint, validates the response. ~30 seconds. Requires Node 22+ for the built-in `WebSocket` global.
+
+```bash
+# Smoke test against running 1.21.11 mod
+node tools/smoke-test.mjs --port 9876 --version 1.21.11
+
+# 1.19 alongside (default ports: 1.21.11=9876, 1.19=9877)
+node tools/smoke-test.mjs --port 9877 --version 1.19
+```
+
+**3. Wire-shape regression mode** — same script with `--regression DIR`. Compares each live response's structural shape (key sets at every level, value types) against a captured fixture; fails on drift.
+
+```bash
+# Capture baselines once after a known-good build
+node tools/smoke-test.mjs --port 9876 --version 1.21.11 \
+    --fixtures tools/fixtures/1.21.11
+
+# Later, after deploying a new build, check for drift
+node tools/smoke-test.mjs --port 9876 --version 1.21.11 \
+    --regression tools/fixtures/1.21.11
+```
+
+The shape comparator tolerates value differences (transient game state) but flags any structural change — added/removed keys, type mismatches. **Conditional fields can produce false positives:** `snapshot.target` is only present when the player is aiming at something; `nearbyEntities[].primaryEquipment` only when the closest entity wears something. Capture fixtures from a richly-populated state, or treat conditional-field diffs as expected.
+
 ## Usage
 
 ### With Claude Code / MCP
 
 Install [mcdev-mcp](https://github.com/weikengchen/mcdev-mcp) and configure it in your MCP client. The MCP server auto-connects to DebugBridge (scans ports 9876–9885). Tools include:
 
-- **Runtime** (requires this mod): `mc_execute`, `mc_snapshot`, `mc_nearby_entities`, `mc_entity_details`, `mc_nearby_blocks`, `mc_block_details`, `mc_screen_inspect`, `mc_chat_history`, `mc_screenshot`, `mc_get_item_texture`, `mc_set_entity_glow`, `mc_set_block_glow`
+- **Runtime** (requires this mod): `mc_execute`, `mc_snapshot`, `mc_nearby_entities`, `mc_entity_details`, `mc_looked_at_entity`, `mc_nearby_blocks`, `mc_block_details`, `mc_screen_inspect`, `mc_chat_history`, `mc_screenshot`, `mc_get_item_texture`, `mc_set_entity_glow`, `mc_set_block_glow`, `mc_clear_block_glow`
 - **Static** (works offline): `mc_get_class`, `mc_get_method`, `mc_search`, `mc_find_refs`, `mc_find_hierarchy`
 
 ### Direct WebSocket
