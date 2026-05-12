@@ -33,7 +33,7 @@ import java.nio.file.Path;
 import java.util.function.Consumer;
 
 public class DebugBridgeMod extends AbstractDebugBridgeMod implements ClientModInitializer {
-    private static final String MC_VERSION = "26.2-snapshot-6";
+    private static final String MC_VERSION = "26.2-snapshot-7";
     private static DebugBridgeMod INSTANCE;
 
     public static void onClientTick(Minecraft mc) {

@@ -17,7 +17,7 @@ dependencies {
     implementation("org.luaj:luaj-jse:3.0.1")
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
     implementation("com.google.code.gson:gson:2.14.0")
-    minecraft("com.mojang:minecraft:26.2-snapshot-6")
+    minecraft("com.mojang:minecraft:26.2-snapshot-7")
     implementation("net.fabricmc:fabric-loader:0.19.2")
 
     include(project(":core"))
