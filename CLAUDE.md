@@ -39,7 +39,7 @@ Each version module has a mixin package + `debugbridge.mixins.json` listing the 
 ## Native entity/texture endpoints
 Do NOT iterate entities/blocks, resolve textures, scan inventories, or read chat via Lua — the per-call Java↔Lua bridge overhead causes 10s timeouts with ~100+ items. Use the native Java endpoints instead:
 - `nearbyEntities` / `entityDetails` / `lookedAtEntity` via `NearbyEntitiesProvider` + `LookedAtEntityProvider` (both versions).
-- `nearbyBlocks` / `blockDetails` via `NearbyBlocksProvider` (signs, chests, banners, beacons, furnaces, etc. — block-entity scan).
+- `nearbyBlocks` / `blockDetails` via `NearbyBlocksProvider` (signs, chests, banners, beacons, furnaces, etc. — block-entity scan). **Caveat:** vanilla MC keeps chest / hopper / dispenser / furnace / brewing-stand contents server-only — `blockDetails.items` is `[]` for those even when the chest has items, because the client never receives them. Use `screenInspect` while the menu is open. `blockDetails.items` only populates for BlockEntities whose items participate in rendering (lecterns, chiseled bookshelves, jukeboxes).
 - `screenInspect` via `ScreenInspectProvider` — current open GUI: type, title, container slots with item stacks. Supports `includeIcons` for one-shot container visibility.
 - `chatHistory` via `ChatHistoryProvider` — recent client-side chat messages. Supports `includeJson` for styled-component access.
 - `getItemTexture` / `getItemTextureById` / `getEntityItemTexture` via `ItemTextureProvider`:

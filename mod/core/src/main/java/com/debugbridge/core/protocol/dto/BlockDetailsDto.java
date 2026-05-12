@@ -32,7 +32,15 @@ public final class BlockDetailsDto {
     public List<String> signLinesBack;
     public Boolean isWaxed;
 
-    // Container-specific.
+    // Container-specific. {@code containerSize} is populated whenever the
+    // BlockEntity implements {@code Container} (since the size is part of
+    // class shape and always available client-side). {@code items} is only
+    // populated when the BlockEntity actually syncs its items to the
+    // client — lecterns, chiseled bookshelves, jukeboxes — i.e. block
+    // types whose items are part of world rendering. Chest / hopper /
+    // dispenser / furnace / brewing-stand etc. contents are server-only
+    // in vanilla and surface here as {@code items: []}; use
+    // {@code screenInspect} on the open menu to read those.
     public List<BlockItemDto> items;
     public Integer containerSize;
 

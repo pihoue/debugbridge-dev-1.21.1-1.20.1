@@ -33,6 +33,16 @@ public interface NearbyBlocksProvider {
     /**
      * Get detailed information about a specific block entity at (x, y, z).
      *
+     * <p>For container BlockEntities, the returned {@code items} list reflects
+     * what is actually present <i>on the client</i> — i.e. only the types
+     * whose contents are part of world rendering and therefore server-synced
+     * (lecterns, chiseled bookshelves, jukeboxes; and any modded BlockEntity
+     * that pushes items via {@code getUpdateTag()}). Vanilla chests, hoppers,
+     * dispensers, furnaces, brewing stands, etc. keep their items server-only,
+     * so this method returns {@code containerSize} but {@code items: []} for
+     * them. Use the {@code screenInspect} endpoint while the menu is open to
+     * see the contents of those containers.
+     *
      * @return populated DTO, or {@code null} when there is no block entity at
      *         that position. The handler converts {@code null} to the on-wire
      *         {@code {"gone": true}} shape.
