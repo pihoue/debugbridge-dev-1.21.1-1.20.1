@@ -7,8 +7,12 @@ base {
 }
 
 java {
+    // 26.2 snapshots (verified against snapshot-6 and snapshot-7) declare a
+    // Java 25 runtime in their version metadata; Modrinth launches them with
+    // Zulu 25. JDK 25 is therefore sufficient to both compile and run; the
+    // toolchain spec used to over-require JDK 26 (EA at the time of writing).
     toolchain {
-        languageVersion.set(JavaLanguageVersion.of(26))
+        languageVersion.set(JavaLanguageVersion.of(25))
     }
 }
 
