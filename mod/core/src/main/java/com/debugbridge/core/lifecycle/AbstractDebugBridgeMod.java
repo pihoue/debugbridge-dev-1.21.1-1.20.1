@@ -14,6 +14,8 @@ import com.debugbridge.core.mapping.MappingResolver;
 import com.debugbridge.core.mapping.ParsedMappings;
 import com.debugbridge.core.mapping.PassthroughResolver;
 import com.debugbridge.core.mapping.ProGuardParser;
+import com.debugbridge.core.recording.FrameCapturer;
+import com.debugbridge.core.recording.RecordingProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.server.BridgeServer;
@@ -143,6 +145,15 @@ public abstract class AbstractDebugBridgeMod {
         server.setChatHistoryProvider(createChatHistoryProvider());
         server.setScreenInspectProvider(createScreenInspectProvider());
         server.setRunCommandEnabled(config.runCommandEnabled);
+
+        FrameCapturer frameCapturer = createFrameCapturer();
+        Path gd = gameDir();
+        if (frameCapturer != null && gd != null) {
+            Path recordingsDir = gd.resolve("debugbridge-recordings");
+            server.setRecordingProvider(new RecordingProvider(frameCapturer, recordingsDir));
+        } else {
+            LOG.info("[DebugBridge] Recording provider not registered (no frame capturer or game dir)");
+        }
 
         if (actualPort != config.port) {
             startupInfo = "Server started on port " + actualPort + " (default " + config.port + " was in use)";
@@ -317,6 +328,16 @@ public abstract class AbstractDebugBridgeMod {
     protected abstract ScreenInspectProvider createScreenInspectProvider();
 
     /**
+     * Build the per-frame capture primitive for {@code record_video}. Default
+     * returns {@code null} which leaves the recording provider unregistered
+     * (the endpoint then surfaces a clean "no provider" error). Each
+     * production subclass overrides with a {@code Minecraft{Version}FrameCapturer}.
+     */
+    protected FrameCapturer createFrameCapturer() {
+        return null;
+    }
+
+    /**
      * Display an error message to the local player. Returns {@code true} if
      * the message was actually shown; {@code false} when the player isn't yet
      * loaded — caller will keep the message and retry on the next tick.
@@ -346,5 +367,18 @@ public abstract class AbstractDebugBridgeMod {
      */
     protected void onPostTick() {
         // no-op
+    }
+
+    /**
+     * Subclass calls this from its render-tick mixin (TAIL of
+     * {@code Minecraft.runTick}). Drives the active recording session
+     * forward by one frame, if any; cheap no-op otherwise.
+     */
+    protected final void handleRenderFrame() {
+        if (server == null) return;
+        RecordingProvider rp = server.getRecordingProvider();
+        if (rp != null) {
+            rp.onRenderFrame();
+        }
     }
 }

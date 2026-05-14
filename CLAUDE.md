@@ -1,11 +1,11 @@
 # DebugBridge — project notes
 
 ## What this is
-A Fabric client mod (Minecraft 1.19 and 1.21.11) that exposes a local WebSocket server for a Vue web UI and for MCP clients to introspect/control the running client. Used for dev-time debugging, not gameplay.
+A Fabric client mod (Minecraft 1.19, 1.21.11, and 26.2-dev snapshot) that exposes a local WebSocket server for a Vue web UI and for MCP clients to introspect/control the running client. Used for dev-time debugging, not gameplay.
 
 ## Repo layout
-- `mod/core/` — shared Java: WebSocket server (`BridgeServer`), Lua runtime, mapping resolver, provider interfaces (`NearbyEntitiesProvider`, `NearbyBlocksProvider`, `LookedAtEntityProvider`, `ScreenshotProvider`, `ItemTextureProvider`, `ScreenInspectProvider`, `ChatHistoryProvider`, `GameStateProvider`).
-- `mod/fabric-1.19/` and `mod/fabric-1.21.11/` — version-specific Fabric mods. Each has its own provider impls + mixins.
+- `mod/core/` — shared Java: WebSocket server (`BridgeServer`), Lua runtime, mapping resolver, provider interfaces (`NearbyEntitiesProvider`, `NearbyBlocksProvider`, `LookedAtEntityProvider`, `ScreenshotProvider`, `ItemTextureProvider`, `ScreenInspectProvider`, `ChatHistoryProvider`, `GameStateProvider`, `FrameCapturer` + recording orchestrator).
+- `mod/fabric-1.19/`, `mod/fabric-1.21.11/`, `mod/fabric-26.2-dev/` — version-specific Fabric mods. Each has its own provider impls + mixins.
 - `web-ui/` — Vue 3 + Pinia + Tailwind app.
 - `build-and-deploy.sh` (1.19) and `build-and-deploy-1.21.11.sh` — build the jar and copy into `~/Library/Application Support/ModrinthApp/profiles/ImagineFun/mods/`.
 
@@ -33,7 +33,7 @@ A Fabric client mod (Minecraft 1.19 and 1.21.11) that exposes a local WebSocket 
 
 ## Mixins
 Each version module has a mixin package + `debugbridge.mixins.json` listing the client-side mixins. Current ones:
-- `MinecraftClientMixin` — taps the end of `Minecraft.tick()` for our `onClientTick` callback.
+- `MinecraftClientMixin` — taps two hooks: TAIL of `Minecraft.tick()` (20 Hz logic tick → `onClientTick`, drives startup messages + warning screen + per-tick housekeeping) and TAIL of `Minecraft.runTick(boolean)` (frame-rate render tick → `onRenderFrame`, drives `RecordingProvider.onRenderFrame` for `record_video`).
 - `EntityGlowMixin` — forces `Entity.isCurrentlyGlowing()` to return `true` for IDs in `ClientEntityGlowManager`, so the web UI can outline selected entities without server authority.
 
 ## Native entity/texture endpoints
@@ -45,6 +45,11 @@ Do NOT iterate entities/blocks, resolve textures, scan inventories, or read chat
 - `getItemTexture` / `getItemTextureById` / `getEntityItemTexture` via `ItemTextureProvider`:
   - **1.21.11**: renders offscreen through `ItemModelResolver` + `GuiRenderer` → GPU texture → PNG. Honors damage/CMD resource-pack overrides.
   - **1.19**: extracts pixels from the baked model's sprite via reflection (no GPU render pipeline in that version).
+- `record_video` via `RecordingProvider` (kernel-side orchestrator in `core/recording/`) + per-version `FrameCapturer`:
+  - Captures N frames of the main framebuffer driven from the `runTick` mixin tail. Output is one JPEG grid or N per-frame JPEGs under `<gameDir>/debugbridge-recordings/<reqId>/`.
+  - Protocol contract lives at `../mcdev-mcp/docs/RECORD_VIDEO_PROTOCOL.md` — that's the canonical spec; mirror changes there if you touch the wire.
+  - `BUSY` is enforced both for concurrent `record_video` requests and for single-shot `screenshot` calls while a recording is in progress (shared render thread).
+  - Cleanup policy: leak. Files accumulate in `debugbridge-recordings/` until manually wiped. Subdir-per-recording layout exists so a future retention sweep is one `find … -mtime` away.
 
 ## 1.19 vs 1.21.11 API quirks
 - `GameProfile.name()` (record accessor) in 1.21.11 vs `GameProfile.getName()` in 1.19.

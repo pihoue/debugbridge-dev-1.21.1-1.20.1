@@ -25,6 +25,10 @@ import com.debugbridge.core.protocol.dto.SearchResultDto;
 import com.debugbridge.core.protocol.dto.SlotDto;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.protocol.dto.StatusDto;
+import com.debugbridge.core.recording.RecordingException;
+import com.debugbridge.core.recording.RecordingProvider;
+import com.debugbridge.core.recording.RecordingRequest;
+import com.debugbridge.core.recording.RecordingResult;
 import com.debugbridge.core.refs.ObjectRefStore;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
@@ -109,6 +113,13 @@ public class BridgeServer extends WebSocketServer {
     private volatile ScreenInspectProvider screenInspectProvider;
 
     /**
+     * Multi-frame framebuffer capture provider. Set by the version-specific
+     * module. Null disables the {@code record_video} endpoint (older test
+     * harnesses don't wire it).
+     */
+    private volatile RecordingProvider recordingProvider;
+
+    /**
      * Callback for bind errors (e.g., port already in use). Called from the
      * WebSocket selector thread when the server fails to bind.
      */
@@ -172,6 +183,16 @@ public class BridgeServer extends WebSocketServer {
         this.screenInspectProvider = provider;
         LOG.info("[DebugBridge] Screen inspect provider registered: "
                 + provider.getClass().getSimpleName());
+    }
+
+    public void setRecordingProvider(RecordingProvider provider) {
+        this.recordingProvider = provider;
+        LOG.info("[DebugBridge] Recording provider registered");
+    }
+
+    /** Exposed so the per-version mod can route render-tick callbacks through. */
+    public RecordingProvider getRecordingProvider() {
+        return recordingProvider;
     }
 
     /**
@@ -275,6 +296,7 @@ public class BridgeServer extends WebSocketServer {
                 case "search" -> handleSearch(req);
                 case "snapshot" -> handleSnapshot(req);
                 case "screenshot" -> handleScreenshot(req);
+                case "record_video" -> handleRecordVideo(req);
                 case "runCommand" ->
                     runCommandEnabled
                             ? handleRunCommand(req)
@@ -469,6 +491,11 @@ public class BridgeServer extends WebSocketServer {
         if (screenshotProvider == null) {
             return BridgeResponse.error(req.id, "No screenshot provider configured for this Minecraft version.");
         }
+        // A record_video drives the render thread frame-by-frame; interleaved
+        // single-shot screenshots would muddy that recording's frame timing.
+        if (recordingProvider != null && recordingProvider.isActive()) {
+            return BridgeResponse.error(req.id, "BUSY: a record_video is in progress");
+        }
         int downscale = 2;
         float quality = 0.75f;
         long timeoutMs = 5000;
@@ -496,6 +523,165 @@ public class BridgeServer extends WebSocketServer {
             return BridgeResponse.error(
                     req.id, "Screenshot failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
+    }
+
+    private BridgeResponse handleRecordVideo(BridgeRequest req) {
+        if (recordingProvider == null) {
+            return BridgeResponse.error(req.id, "No recording provider configured for this Minecraft version.");
+        }
+        RecordingRequest validated;
+        try {
+            validated = validateRecordVideoPayload(req);
+        } catch (IllegalArgumentException e) {
+            return BridgeResponse.error(req.id, "INVALID_INPUT: " + e.getMessage());
+        }
+        try {
+            RecordingResult result = recordingProvider.record(validated);
+            return BridgeResponse.success(req.id, recordingResultToJson(result), null);
+        } catch (RecordingException e) {
+            return BridgeResponse.error(req.id, e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return BridgeResponse.error(req.id, "INTERNAL: interrupted while waiting for recording");
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "INTERNAL: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    private static RecordingRequest validateRecordVideoPayload(BridgeRequest req) {
+        JsonObject p = req.payload;
+        if (p == null || !p.has("frames")) {
+            throw new IllegalArgumentException("'frames' is required");
+        }
+        int frames;
+        try {
+            frames = p.get("frames").getAsInt();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("'frames' must be an integer");
+        }
+        if (frames < 1) {
+            throw new IllegalArgumentException("frames=" + frames + " must be >= 1");
+        }
+        if (frames > RecordingRequest.MAX_FRAMES) {
+            throw new IllegalArgumentException(
+                    "frames=" + frames + " exceeds MAX_FRAMES=" + RecordingRequest.MAX_FRAMES);
+        }
+
+        long intervalMs = RecordingRequest.INTERVAL_EVERY_FRAME;
+        if (p.has("interval") && !p.get("interval").isJsonNull()) {
+            JsonElement iv = p.get("interval");
+            if (iv.isJsonPrimitive() && iv.getAsJsonPrimitive().isString()) {
+                String s = iv.getAsString();
+                if (!"frame".equals(s)) {
+                    throw new IllegalArgumentException("interval string must be \"frame\", got \"" + s + "\"");
+                }
+                // intervalMs stays at INTERVAL_EVERY_FRAME.
+            } else if (iv.isJsonPrimitive() && iv.getAsJsonPrimitive().isNumber()) {
+                double ms = iv.getAsDouble();
+                if (ms < 1.0) {
+                    throw new IllegalArgumentException("interval=" + ms + " must be >= 1 ms");
+                }
+                intervalMs = Math.round(ms);
+            } else {
+                throw new IllegalArgumentException("interval must be \"frame\" or a number of ms");
+            }
+        }
+
+        RecordingRequest.OutputMode output = RecordingRequest.OutputMode.GRID;
+        if (p.has("output") && !p.get("output").isJsonNull()) {
+            String s = p.get("output").getAsString();
+            switch (s) {
+                case "grid" -> output = RecordingRequest.OutputMode.GRID;
+                case "frames" -> output = RecordingRequest.OutputMode.FRAMES;
+                default ->
+                    throw new IllegalArgumentException("output must be \"grid\" or \"frames\", got \"" + s + "\"");
+            }
+        }
+
+        int gridCols = (int) Math.max(1, Math.ceil(Math.sqrt(frames)));
+        if (p.has("gridCols") && !p.get("gridCols").isJsonNull()) {
+            try {
+                gridCols = p.get("gridCols").getAsInt();
+            } catch (Exception e) {
+                throw new IllegalArgumentException("'gridCols' must be an integer");
+            }
+            if (gridCols < 1 || gridCols > frames) {
+                throw new IllegalArgumentException("gridCols=" + gridCols + " must be in [1, " + frames + "]");
+            }
+        }
+
+        int downscale = 2;
+        if (p.has("downscale") && !p.get("downscale").isJsonNull()) {
+            try {
+                downscale = p.get("downscale").getAsInt();
+            } catch (Exception e) {
+                throw new IllegalArgumentException("'downscale' must be an integer");
+            }
+            if (downscale < 1) {
+                throw new IllegalArgumentException("downscale=" + downscale + " must be >= 1");
+            }
+        }
+
+        float quality = 0.75f;
+        if (p.has("quality") && !p.get("quality").isJsonNull()) {
+            try {
+                quality = p.get("quality").getAsFloat();
+            } catch (Exception e) {
+                throw new IllegalArgumentException("'quality' must be a number");
+            }
+            if (quality < 0.05f || quality > 1.0f) {
+                throw new IllegalArgumentException("quality=" + quality + " must be in [0.05, 1.0]");
+            }
+        }
+
+        String requestId =
+                (req.id != null && !req.id.isBlank()) ? sanitizeRequestId(req.id) : "rec-" + System.currentTimeMillis();
+        return new RecordingRequest(requestId, frames, intervalMs, output, gridCols, downscale, quality);
+    }
+
+    /**
+     * Strip filesystem-hostile characters from the request id so it's safe to
+     * use as a subdir name. Conservative: only keep alphanumerics, dash, dot,
+     * underscore.
+     */
+    private static String sanitizeRequestId(String id) {
+        StringBuilder sb = new StringBuilder(id.length());
+        for (int i = 0; i < id.length(); i++) {
+            char c = id.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '-' || c == '_' || c == '.') {
+                sb.append(c);
+            } else {
+                sb.append('_');
+            }
+        }
+        return sb.length() == 0 ? "rec-" + System.currentTimeMillis() : sb.toString();
+    }
+
+    private static JsonObject recordingResultToJson(RecordingResult result) {
+        JsonObject obj = new JsonObject();
+        obj.addProperty("frameWidth", result.frameWidth);
+        obj.addProperty("frameHeight", result.frameHeight);
+        obj.addProperty("frameCount", result.frameCount);
+        obj.addProperty("captureMs", result.captureMs);
+        obj.addProperty("intervalMs", result.meanIntervalMs);
+        obj.addProperty("mimeType", "image/jpeg");
+        obj.addProperty("dropped", result.dropped);
+        if (result instanceof RecordingResult.Grid g) {
+            obj.addProperty("mode", "grid");
+            obj.addProperty("path", g.path);
+            obj.addProperty("width", g.width);
+            obj.addProperty("height", g.height);
+            obj.addProperty("sizeBytes", g.sizeBytes);
+            obj.addProperty("gridCols", g.gridCols);
+            obj.addProperty("gridRows", g.gridRows);
+        } else if (result instanceof RecordingResult.Frames f) {
+            obj.addProperty("mode", "frames");
+            JsonArray arr = new JsonArray();
+            for (String path : f.paths) arr.add(path);
+            obj.add("paths", arr);
+            obj.addProperty("sizeBytes", f.sizeBytes);
+        }
+        return obj;
     }
 
     private BridgeResponse handleSnapshot(BridgeRequest req) {

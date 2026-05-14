@@ -13,6 +13,7 @@ import com.debugbridge.core.protocol.dto.SnapshotTargetDto;
 import com.debugbridge.core.protocol.dto.SnapshotVehicleDto;
 import com.debugbridge.core.protocol.dto.SnapshotWorldDto;
 import com.debugbridge.core.protocol.dto.Vec3Dto;
+import com.debugbridge.core.recording.FrameCapturer;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
@@ -38,6 +39,12 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod implements ClientModI
     public static void onClientTick(Minecraft mc) {
         if (INSTANCE != null) {
             INSTANCE.handleTick();
+        }
+    }
+
+    public static void onRenderFrame(Minecraft mc) {
+        if (INSTANCE != null) {
+            INSTANCE.handleRenderFrame();
         }
     }
 
@@ -82,6 +89,11 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod implements ClientModI
     @Override
     protected ScreenshotProvider createScreenshotProvider() {
         return new Minecraft262ScreenshotProvider();
+    }
+
+    @Override
+    protected FrameCapturer createFrameCapturer() {
+        return new Minecraft262FrameCapturer();
     }
 
     @Override

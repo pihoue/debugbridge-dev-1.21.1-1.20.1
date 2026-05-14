@@ -14,4 +14,9 @@ public class MinecraftClientMixin {
     private void onEndTick(CallbackInfo ci) {
         DebugBridgeMod.onClientTick((Minecraft) (Object) this);
     }
+
+    @Inject(method = "runTick", at = @At("TAIL"))
+    private void onEndRunTick(boolean tick, CallbackInfo ci) {
+        DebugBridgeMod.onRenderFrame((Minecraft) (Object) this);
+    }
 }
