@@ -381,4 +381,30 @@ public abstract class AbstractDebugBridgeMod {
             rp.onRenderFrame();
         }
     }
+
+    /**
+     * Subclass calls this from its {@code Minecraft.close()} mixin (HEAD).
+     * Stops the {@link BridgeServer} so its non-daemon worker pool (selector +
+     * decoders + connection-lost checker) doesn't pin the JVM in
+     * {@code Threads::destroy_vm()} after the render thread exits. Without
+     * this, the MC client-shutdown watchdog eventually {@code abort()}s the
+     * process — see {@code Minecraft.close()} in newer snapshots, which have
+     * a stricter timeout than 1.21.x.
+     */
+    protected final void handleClose() {
+        BridgeServer s = server;
+        if (s == null) return;
+        server = null;
+        try {
+            // 1s grace period — workers idle on a take() will unwind in well
+            // under that; longer waits compete with MC's own shutdown watchdog.
+            s.stop(1_000);
+            LOG.info("[DebugBridge] BridgeServer stopped on client close");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.warning("[DebugBridge] Interrupted while stopping BridgeServer on close");
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "[DebugBridge] BridgeServer failed to stop cleanly", e);
+        }
+    }
 }

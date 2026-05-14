@@ -47,6 +47,12 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod implements ClientModI
         }
     }
 
+    public static void onClientClose(Minecraft mc) {
+        if (INSTANCE != null) {
+            INSTANCE.handleClose();
+        }
+    }
+
     @Override
     public void onInitializeClient() {
         INSTANCE = this;
