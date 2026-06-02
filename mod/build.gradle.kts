@@ -12,6 +12,7 @@ allprojects {
     repositories {
         mavenCentral()
         maven("https://maven.fabricmc.net/")
+        maven("https://maven.neoforged.net/releases/")
     }
 }
 
