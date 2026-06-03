@@ -6,21 +6,24 @@ base {
     archivesName.set("debugbridge-1.20.1-neoforge")
 }
 
+sourceSets {
+    main {
+        java {
+            srcDir(file("../core/src/main/java"))
+        }
+    }
+}
+
 dependencies {
-    implementation(project(":core"))
     implementation("org.java-websocket:Java-WebSocket:1.6.0") {
         exclude(group = "org.slf4j")
     }
+    implementation("org.luaj:luaj-jse:3.0.1")
+    implementation("com.google.code.gson:gson:2.14.0")
     implementation("net.neoforged:neoforge:20.4.237")
-
-
-    jarJar(project(":core"))
-    jarJar("org.luaj:luaj-jse:3.0.1")
-    jarJar("org.java-websocket:Java-WebSocket:1.6.0")
-    jarJar("com.google.code.gson:gson:2.14.0")
 }
 
-// Manual jarJar: merge core + external deps into JAR
+// Merge external deps into JAR for production
 tasks.jar {
     dependsOn(configurations.named("runtimeClasspath"))
     from({
@@ -41,5 +44,3 @@ tasks.processResources {
         filter { line -> line.replace("\${version}", project.version.toString()) }
     }
 }
-
-
