@@ -6,7 +6,6 @@ import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
 import com.debugbridge.core.lifecycle.AbstractDebugBridgeMod;
 import com.debugbridge.core.mapping.FabricNamespaceLookup;
-import com.debugbridge.core.mapping.MappingResolver;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.protocol.dto.SnapshotPlayerDto;
 import com.debugbridge.core.protocol.dto.SnapshotTargetDto;
@@ -84,11 +83,6 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     @Override
     protected FabricNamespaceLookup createNamespaceLookup() {
         return null;
-    }
-
-    @Override
-    protected MappingResolver buildResolver() {
-        return new NeoForgeMappingResolver(MC_VERSION);
     }
 
     @Override

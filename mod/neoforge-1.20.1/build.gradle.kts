@@ -30,6 +30,7 @@ tasks.jar {
         configurations.named("runtimeClasspath").get()
             .filter { it.name.endsWith(".jar") }
             .filter { it.name.contains("core-") || it.name.contains("luaj") || it.name.contains("Java-WebSocket") || it.name.contains("gson") }
+            .filter { !it.name.contains("oshi") }
             .map { zipTree(it) }
     })
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
