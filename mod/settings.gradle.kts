@@ -8,5 +8,4 @@ pluginManagement {
 
 rootProject.name = "debugbridge"
 
-include(":core")
 include(":neoforge-1.20.1")
