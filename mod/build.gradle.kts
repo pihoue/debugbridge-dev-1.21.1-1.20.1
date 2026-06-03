@@ -1,7 +1,6 @@
 import com.diffplug.gradle.spotless.SpotlessExtension
 
 plugins {
-    java
     id("com.diffplug.spotless") version "8.5.1" apply false
 }
 
@@ -11,7 +10,6 @@ allprojects {
 
     repositories {
         mavenCentral()
-        maven("https://maven.fabricmc.net/")
         maven("https://maven.neoforged.net/releases/")
     }
 }
@@ -19,15 +17,6 @@ allprojects {
 subprojects {
     apply(plugin = "java")
     apply(plugin = "com.diffplug.spotless")
-
-    java {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    tasks.withType<JavaCompile>().configureEach {
-        options.release.set(17)
-    }
 
     configure<SpotlessExtension> {
         java {

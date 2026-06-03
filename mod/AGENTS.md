@@ -1,28 +1,25 @@
-# DebugBridge Mod Notes
-
-This directory contains the Java/Fabric side of DebugBridge.
+# DebugBridge Mod Notes (NeoForge 1.21.1)
 
 ## Project Shape
 
-- `core`: protocol, server, Lua bridge, mapping, snapshots, screenshots, textures, and provider interfaces. It must stay independent of Fabric implementation packages.
-- `fabric-*`: Minecraft-version-specific adapters. Version APIs stay inside their own Fabric module.
+- `core`: protocol, server, Lua bridge, mapping, snapshots, screenshots, textures, and provider interfaces.
+- `neoforge-1.21.1`: Minecraft version-specific adapters for NeoForge 1.21.1.
 
-## Verification
-
-Use the Gradle wrapper from this directory:
+## Building
 
 ```powershell
-.\gradlew.bat :core:test :fabric-26.2-dev:jar --console=plain
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
+.\gradlew.bat :neoforge-1.21.1:jar --console=plain
 ```
 
-For broader checks, run:
+## Testing
 
 ```powershell
-.\gradlew.bat build --console=plain
+.\gradlew.bat :core:test --console=plain
 ```
 
-## Working Notes
+## Key Points
 
-- Use PowerShell-native search (`Get-ChildItem`, `Select-String`) if `rg` fails with `Access is denied` in Codex Desktop.
-- Prefer MCP tool calls for Minecraft live checks: `mc_execute`, `mc_snapshot`, and other native runtime tools.
-- Treat `fabric-26.2-dev/src/main/resources/fabric.mod.json` as potentially user-edited unless your task explicitly touches metadata.
+- Uses Mojang names directly (no mapping resolution needed)
+- `BlockGlowMixin` hooks into `LevelRenderer.renderLevel`
+- Item textures via baked model sprite extraction

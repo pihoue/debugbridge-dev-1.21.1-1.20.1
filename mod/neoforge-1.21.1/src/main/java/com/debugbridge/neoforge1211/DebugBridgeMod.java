@@ -30,8 +30,10 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent;
 import net.neoforged.fml.loading.FMLPaths;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
+import net.neoforged.neoforge.common.NeoForge;
 
 @Mod("debugbridge")
 public class DebugBridgeMod extends AbstractDebugBridgeMod {
@@ -40,19 +42,9 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
 
     public DebugBridgeMod(IEventBus modEventBus) {
         INSTANCE = this;
-        modEventBus.addListener(this::onClientSetup);
-    }
-
-    public static void onClientTick(Minecraft mc) {
-        if (INSTANCE != null) {
-            INSTANCE.handleTick();
-        }
-    }
-
-    public static void onRenderFrame(Minecraft mc) {
-        if (INSTANCE != null) {
-            INSTANCE.handleRenderFrame();
-        }
+        NeoForge.EVENT_BUS.addListener(this::onClientTick);
+        NeoForge.EVENT_BUS.addListener(this::onRenderFrame);
+        initialize();
     }
 
     public static void onClientClose(Minecraft mc) {
@@ -61,8 +53,12 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
         }
     }
 
-    private void onClientSetup(final FMLClientSetupEvent event) {
-        initialize();
+    private void onClientTick(final ClientTickEvent.Post event) {
+        handleTick();
+    }
+
+    private void onRenderFrame(final RenderFrameEvent.Post event) {
+        handleRenderFrame();
     }
 
     @Override

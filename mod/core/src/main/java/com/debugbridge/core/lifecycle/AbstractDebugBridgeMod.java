@@ -203,8 +203,10 @@ public abstract class AbstractDebugBridgeMod {
             server.setReuseAddr(true);
             server.setGameDir(gameDir());
             server.start();
+            // WebSocketServer.start() is async; give the thread a moment to bind
+            Thread.sleep(300);
             return true;
-        } catch (Exception e) {
+        } catch (Throwable e) {
             LOG.log(Level.SEVERE, "[DebugBridge] Failed to start server on port " + port, e);
             return false;
         }
