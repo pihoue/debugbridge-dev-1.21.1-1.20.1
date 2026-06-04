@@ -6,6 +6,11 @@ import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
 import com.debugbridge.core.lifecycle.AbstractDebugBridgeMod;
 import com.debugbridge.core.mapping.FabricNamespaceLookup;
+import com.debugbridge.core.mapping.MappingCache;
+import com.debugbridge.core.mapping.MappingDownloader;
+import com.debugbridge.core.mapping.MappingResolver;
+import com.debugbridge.core.mapping.ParsedMappings;
+import com.debugbridge.core.mapping.ProGuardParser;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.protocol.dto.SnapshotPlayerDto;
 import com.debugbridge.core.protocol.dto.SnapshotTargetDto;
@@ -78,8 +83,30 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
 
     @Override
     protected FabricNamespaceLookup createNamespaceLookup() {
-        // 1.21.1 NeoForge uses Mojang mappings at runtime — no translation needed
         return null;
+    }
+
+    @Override
+    protected MappingResolver buildResolver() {
+        try {
+            String mcVer = mcVersion();
+            MappingCache cache = new MappingCache();
+            String content;
+            if (cache.has(mcVer)) {
+                LOG.info("[DebugBridge] Loading cached " + mcVer + " mappings...");
+                content = cache.load(mcVer);
+            } else {
+                LOG.info("[DebugBridge] Downloading " + mcVer + " mappings from Mojang...");
+                content = new MappingDownloader().download(mcVer);
+                cache.save(mcVer, content);
+            }
+            ParsedMappings mappings = ProGuardParser.parse(content);
+            LOG.info("[DebugBridge] Parsed " + mappings.classes.size() + " classes from mappings.");
+            return new NeoForgeSearchResolver(mcVer, mappings);
+        } catch (Exception e) {
+            LOG.warning("[DebugBridge] Failed to load mappings, search will be unavailable: " + e.getMessage());
+            return super.buildResolver();
+        }
     }
 
     @Override

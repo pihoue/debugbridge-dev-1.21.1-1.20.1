@@ -31,8 +31,7 @@ dependencies {
     jarJar("org.java-websocket:Java-WebSocket:1.6.0") {
         exclude(group = "org.slf4j")
     }
-    // Gson excluded — NeoForge bundles it already; jarJar would create
-    // a module conflict ("com.google.gson read from two modules").
+    // Gson excluded — NeoForge bundles it already.
 }
 
 configurations.configureEach {

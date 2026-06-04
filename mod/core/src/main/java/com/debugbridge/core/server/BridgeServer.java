@@ -365,7 +365,8 @@ public class BridgeServer {
             timeoutMs = Math.min(MAX_EXECUTE_TIMEOUT_MS, Math.max(0, requested));
         }
 
-        LuaRuntime.ExecutionResult result = lua.execute(code, timeoutMs);
+        LuaRuntime rt = getLuaRuntime();
+        LuaRuntime.ExecutionResult result = rt.execute(code, timeoutMs);
 
         if (!result.isSuccess()) {
             return BridgeResponse.error(req.id, result.error);

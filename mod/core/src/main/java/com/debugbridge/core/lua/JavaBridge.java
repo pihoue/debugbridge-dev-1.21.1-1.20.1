@@ -511,17 +511,25 @@ public class JavaBridge {
     }
 
     /**
-     * java.ref(refId) -> stored object
+     * java.ref(obj) -> refId  (store a Java object, returns a stable string ID)
+     * java.ref(refId) -> obj  (retrieve a previously stored object by its ID)
      */
     private class RefFunction extends OneArgFunction {
         @Override
         public LuaValue call(LuaValue arg) {
-            String refId = arg.checkjstring();
-            Object obj = refs.get(refId);
-            if (obj == null) {
-                throw new LuaError("Reference " + refId + " not found or has been garbage collected");
+            if (arg.isstring() && !(arg instanceof JavaObjectWrapper)) {
+                String refId = arg.checkjstring();
+                Object obj = refs.get(refId);
+                if (obj == null) {
+                    throw new LuaError("Reference " + refId + " not found or has been garbage collected");
+                }
+                return wrapJavaValue(obj);
             }
-            return wrapJavaValue(obj);
+            if (arg instanceof JavaObjectWrapper wrapper) {
+                String newRefId = refs.store(wrapper.getJavaObject());
+                return LuaValue.valueOf(newRefId);
+            }
+            throw new LuaError("java.ref: expected a Java object or a reference ID string");
         }
     }
 
