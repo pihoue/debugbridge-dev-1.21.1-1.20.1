@@ -16,14 +16,14 @@ java {
 
 dependencies {
     implementation(project(":core"))
-    implementation("org.apache.groovy:groovy:4.0.32")
+    implementation("org.apache.groovy:groovy:5.0.6")
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
     implementation("com.google.code.gson:gson:2.14.0")
     minecraft("com.mojang:minecraft:26.2-pre-2")
     implementation("net.fabricmc:fabric-loader:0.19.2")
 
     include(project(":core"))
-    include("org.apache.groovy:groovy:4.0.32")
+    include("org.apache.groovy:groovy:5.0.6")
     include("org.java-websocket:Java-WebSocket:1.6.0")
     include("com.google.code.gson:gson:2.14.0")
 }
