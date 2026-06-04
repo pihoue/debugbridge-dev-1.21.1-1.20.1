@@ -1,45 +1,45 @@
-# neoforge/1.20.1 — 开发计划
+# forge/1.20.1 — 开发计划
 
 ## 状态
-- ✅ 编译通过 (Gradle 8.10.2 + NeoGradle userdev 7.0.183)
-- ✅ JAR 生成 (`debugbridge-1.20.1-neoforge-1.1.0.jar`, 650KB, 含 jarJar 依赖)
-- ✅ IDEA 运行配置已添加 (Build/Run)
-- ❌ 运行时测试未做
+- ✅ **编译通过** (Gradle 8.10.2 + ForgeGradle 6.0 + Forge 1.20.1-47.2.0)
+- ✅ **JAR 生成** (`debugbridge-1.20.1-forge-1.1.0.jar`, 含依赖)
+- ✅ **runClient dev 模式运行正常**（extractBridgeLibs 注入外部库）
+- ✅ **WebSocket 端口 9876 已监听**
+- ✅ **全部端点验证通过**
+- ✅ **Lua execute / java.import / java.describe 正常**
+- ✅ **java.ref() 双向引用** — `java.ref(obj) → refId` 和 `java.ref(refId) → obj`
+- ✅ **java.find() 映射搜索** — ForgeSearchResolver 下载 ProGuard 映射（7436 个类）
 
-## 构建
+## 构建 & 运行
 
 ```powershell
 $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
 cd mod
-.\gradlew.bat :neoforge-1.20.1:jar --console=plain
+.\gradlew.bat :forge-1.20.1:runClient --console=plain
 ```
 
-IDEA: Run Configuration → Build NeoForge 1.20.1 JAR
+## 模块结构（共用 settings.gradle.kts）
 
-## 待完成任务
+```
+mod/
+├── settings.gradle.kts    ← 共用：包含 :core, :forge-1.20.1 (Gradle<9), :neoforge-1.21.1
+├── build.gradle.kts       ← 共用：Spotless + 通用仓库
+├── core/                  ← 共用模块，options.release=17
+├── forge-1.20.1/          ← ForgeGradle 6.x，Java 17
+└── neoforge-1.21.1/       ← NeoForge moddev 插件，仅 Gradle ≥9 时可用
+```
 
-### P0 — 映射解析验证
-- [ ] `NeoForgeMappingResolver` 使用 Mojang ProGuard 映射 → 确认运行时名称匹配
-- [ ] 如果映射不匹配, 使用 `PassthroughResolver` (createNamespaceLookup 返回 null)
+## 修复记录
 
-### P0 — 部署测试
-- [ ] 将 JAR 放入 Minecraft 1.20.1 NeoForge 实例的 `mods/` 目录
-- [ ] 确认游戏启动无报错
-- [ ] 确认 WebSocket 端口 9876 已监听
-- [ ] 运行 `node tools/smoke-test.mjs --port 9876`
+| 问题 | 修复 |
+|---|---|
+| Mixin 包路径错误（`neoforge1201`→`forge1201`） | `debugbridge.mixins.json` |
+| FPS 获取（`mc.fpsString`→`mc.getFps()`） | `DebugBridgeMod.java` |
+| 运行时 ClassNotFoundException: WebSocketServer | `extractBridgeLibs` task |
+| 类路径依赖传递（core 非子项目） | `implementation(project(":core"))` |
+| `java.ref()` 只支持读取 | 新增对象→refId 分支 |
+| `java.find()` 返回空 | `ForgeSearchResolver` |
 
-### P1 — 功能完善
-- [ ] `MinecraftClientMixin.close()` — 验证 `Minecraft.close()` 在 1.20.1 是否存在
-- [ ] FPS 获取: 当前使用 `mc.fpsString` 解析 vs `Debug.getFPS()`
-- [ ] 运行 `.\gradlew.bat :core:test` 确认 core 测试通过
-- [ ] 修复 deprecation warnings
-
-### P2 — 优化
-- [ ] 使用 NeoForge 事件总线替代 Mixin
-- [ ] BlockGlowMixin 验证 1.20.1 方法签名
-- [ ] 清理 `fabric-*` 目录
-- [ ] IDEA 配置需要重新导入 Gradle 项目
-
-### 已知限制
-- jarJar 通过手动 `from()` 合并实现 (NeoGradle userdev 7.x 的 jarJar 不自动包含)
-- ItemTextureProvider 使用 baked model sprite 提取, 不支持染色效果
+## 已知限制
+- JAR 依赖通过 `from()` 手动打包
+- 纹理使用反射提取精灵像素（同 1.19 Fabric，无 GPU 管线）

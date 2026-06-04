@@ -1,28 +1,32 @@
 # DebugBridge Mod Notes
 
-This directory contains the Java/Fabric side of DebugBridge.
-
 ## Project Shape
 
-- `core`: protocol, server, Lua bridge, mapping, snapshots, screenshots, textures, and provider interfaces. It must stay independent of Fabric implementation packages.
-- `fabric-*`: Minecraft-version-specific adapters. Version APIs stay inside their own Fabric module.
+- `core`: protocol, server, Lua bridge, mapping, snapshots, screenshots, textures, and provider interfaces. Version-agnostic.
+- `forge-1.20.1`: Forge 1.20.1 adapters (ForgeGradle 6.x, Java 17).
+- `neoforge-1.21.1`: NeoForge 1.21.1 adapters (NeoForge moddev, Java 21).
 
-## Verification
-
-Use the Gradle wrapper from this directory:
-
-```powershell
-.\gradlew.bat :core:test :fabric-26.2-dev:jar --console=plain
-```
-
-For broader checks, run:
+## Building
 
 ```powershell
-.\gradlew.bat build --console=plain
+# Forge 1.20.1
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
+.\gradlew.bat :forge-1.20.1:runClient --console=plain
+
+# NeoForge 1.21.1
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
+.\gradlew.bat :neoforge-1.21.1:runClient --console=plain
 ```
 
-## Working Notes
+## Testing
 
-- Use PowerShell-native search (`Get-ChildItem`, `Select-String`) if `rg` fails with `Access is denied` in Codex Desktop.
-- Prefer MCP tool calls for Minecraft live checks: `mc_execute`, `mc_snapshot`, and other native runtime tools.
-- Treat `fabric-26.2-dev/src/main/resources/fabric.mod.json` as potentially user-edited unless your task explicitly touches metadata.
+```powershell
+.\gradlew.bat :core:test --console=plain
+```
+
+## Key Points
+
+- Core compiled at Java 17 target (compatible with both branches).
+- Forge 1.20.1 uses ForgeGradle 6.x (Gradle 8.10.2).
+- NeoForge 1.21.1 uses NeoForge moddev plugin (Gradle 9.5.1).
+- Both branches share the same `settings.gradle.kts` and `build.gradle.kts`.
