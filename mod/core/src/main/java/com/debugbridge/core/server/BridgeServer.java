@@ -126,6 +126,13 @@ public class BridgeServer extends WebSocketServer {
     private volatile Consumer<Exception> bindErrorCallback;
 
     /**
+     * Callback invoked from the server thread once the socket is bound and the
+     * accept loop is running. Paired with {@link #bindErrorCallback} so callers
+     * can synchronously wait for the async start to complete.
+     */
+    private volatile Runnable startCallback;
+
+    /**
      * Whether slash-command execution via the bridge is honored. When false
      * runCommand requests behave as if they don't exist.
      */
@@ -243,6 +250,15 @@ public class BridgeServer extends WebSocketServer {
         this.bindErrorCallback = callback;
     }
 
+    /**
+     * Set a callback invoked when the server has successfully bound and
+     * started its accept loop. Used together with the bind-error callback
+     * to synchronise on the async startup.
+     */
+    public void setStartCallback(Runnable callback) {
+        this.startCallback = callback;
+    }
+
     @Override
     public void onOpen(WebSocket conn, ClientHandshake handshake) {
         LOG.info("[DebugBridge] Client connected: " + conn.getRemoteSocketAddress());
@@ -292,6 +308,10 @@ public class BridgeServer extends WebSocketServer {
     @Override
     public void onStart() {
         LOG.info("[DebugBridge] Server started on port " + getPort());
+        Runnable cb = this.startCallback;
+        if (cb != null) {
+            cb.run();
+        }
     }
 
     private BridgeResponse handleRequest(BridgeRequest req) {

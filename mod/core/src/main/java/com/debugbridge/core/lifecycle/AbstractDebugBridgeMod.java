@@ -21,11 +21,13 @@ import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.server.BridgeServer;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -198,14 +200,34 @@ public abstract class AbstractDebugBridgeMod {
             LOG.info("[DebugBridge] Port " + port + " is not available");
             return false;
         }
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicBoolean bindFailed = new AtomicBoolean(false);
         try {
             server = new BridgeServer(port, resolver, dispatcher, stateProvider, screenshotProvider);
             server.setReuseAddr(true);
             server.setGameDir(gameDir());
+            server.setBindErrorCallback(ex -> {
+                bindFailed.set(true);
+                latch.countDown();
+            });
+            server.setStartCallback(latch::countDown);
             server.start();
+            // Wait for the async bind to complete (or fail).
+            // Java-WebSocket's start() creates a thread and binds asynchronously.
+            boolean started = latch.await(5, TimeUnit.SECONDS);
+            if (!started || bindFailed.get()) {
+                LOG.severe("[DebugBridge] Server failed to bind on port " + port);
+                server.stop(100);
+                server = null;
+                return false;
+            }
             return true;
         } catch (Exception e) {
             LOG.log(Level.SEVERE, "[DebugBridge] Failed to start server on port " + port, e);
+            if (server != null) {
+                try { server.stop(100); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                server = null;
+            }
             return false;
         }
     }
