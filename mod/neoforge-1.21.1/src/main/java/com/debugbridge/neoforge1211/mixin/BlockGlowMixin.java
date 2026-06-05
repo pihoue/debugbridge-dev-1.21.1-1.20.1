@@ -22,10 +22,7 @@ public abstract class BlockGlowMixin {
     @Final
     private RenderBuffers renderBuffers;
 
-    @Inject(
-            method =
-                    "renderLevel(Lcom/mojang/blaze3d/vertex/PoseStack;FJZLnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/GameRenderer;Lnet/minecraft/client/renderer/LightTexture;Lorg/joml/Matrix4f;)V",
-            at = @At("TAIL"))
+    @Inject(method = "renderLevel", at = @At("TAIL"))
     private void debugbridge$renderBlockGlow(
             PoseStack poseStack,
             float partialTicks,
