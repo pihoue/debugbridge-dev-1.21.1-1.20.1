@@ -53,9 +53,16 @@ public class BlockGlowMixin {
             LevelRenderer.renderLineBox(
                     poseStack,
                     vertexConsumer,
-                    pos.getX(), pos.getY(), pos.getZ(),
-                    pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1,
-                    r, g, b, a);
+                    pos.getX(),
+                    pos.getY(),
+                    pos.getZ(),
+                    pos.getX() + 1,
+                    pos.getY() + 1,
+                    pos.getZ() + 1,
+                    r,
+                    g,
+                    b,
+                    a);
         }
 
         poseStack.popPose();

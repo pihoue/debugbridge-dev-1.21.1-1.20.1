@@ -65,16 +65,24 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     }
 
     @Override
-    protected String mcVersion() { return MC_VERSION; }
+    protected String mcVersion() {
+        return MC_VERSION;
+    }
 
     @Override
-    protected Path configDir() { return FMLPaths.CONFIGDIR.get(); }
+    protected Path configDir() {
+        return FMLPaths.CONFIGDIR.get();
+    }
 
     @Override
-    protected Path gameDir() { return FMLPaths.GAMEDIR.get(); }
+    protected Path gameDir() {
+        return FMLPaths.GAMEDIR.get();
+    }
 
     @Override
-    protected FabricNamespaceLookup createNamespaceLookup() { return null; }
+    protected FabricNamespaceLookup createNamespaceLookup() {
+        return null;
+    }
 
     @Override
     protected MappingResolver buildResolver() {
@@ -100,40 +108,61 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     }
 
     @Override
-    protected void submitToGameThread(Runnable task) { Minecraft.getInstance().execute(task); }
+    protected void submitToGameThread(Runnable task) {
+        Minecraft.getInstance().execute(task);
+    }
 
     @Override
-    protected GameStateProvider createStateProvider() { return new Minecraft1201StateProvider(); }
+    protected GameStateProvider createStateProvider() {
+        return new Minecraft1201StateProvider();
+    }
 
     @Override
-    protected ScreenshotProvider createScreenshotProvider() { return new Minecraft1201ScreenshotProvider(); }
+    protected ScreenshotProvider createScreenshotProvider() {
+        return new Minecraft1201ScreenshotProvider();
+    }
 
     @Override
-    protected FrameCapturer createFrameCapturer() { return new Minecraft1201FrameCapturer(); }
+    protected FrameCapturer createFrameCapturer() {
+        return new Minecraft1201FrameCapturer();
+    }
 
     @Override
-    protected ItemTextureProvider createTextureProvider() { return new Minecraft1201ItemTextureProvider(); }
+    protected ItemTextureProvider createTextureProvider() {
+        return new Minecraft1201ItemTextureProvider();
+    }
 
     @Override
-    protected NearbyEntitiesProvider createEntitiesProvider() { return new Minecraft1201NearbyEntitiesProvider(); }
+    protected NearbyEntitiesProvider createEntitiesProvider() {
+        return new Minecraft1201NearbyEntitiesProvider();
+    }
 
     @Override
-    protected NearbyBlocksProvider createBlocksProvider() { return new Minecraft1201NearbyBlocksProvider(); }
+    protected NearbyBlocksProvider createBlocksProvider() {
+        return new Minecraft1201NearbyBlocksProvider();
+    }
 
     @Override
-    protected LookedAtEntityProvider createLookedAtEntityProvider() { return new Minecraft1201LookedAtEntityProvider(); }
+    protected LookedAtEntityProvider createLookedAtEntityProvider() {
+        return new Minecraft1201LookedAtEntityProvider();
+    }
 
     @Override
-    protected ChatHistoryProvider createChatHistoryProvider() { return new Minecraft1201ChatHistoryProvider(); }
+    protected ChatHistoryProvider createChatHistoryProvider() {
+        return new Minecraft1201ChatHistoryProvider();
+    }
 
     @Override
-    protected ScreenInspectProvider createScreenInspectProvider() { return new Minecraft1201ScreenInspectProvider(); }
+    protected ScreenInspectProvider createScreenInspectProvider() {
+        return new Minecraft1201ScreenInspectProvider();
+    }
 
     @Override
     protected boolean displayPlayerError(String message) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return false;
-        mc.player.displayClientMessage(Component.literal("[DebugBridge] " + message).withStyle(s -> s.withColor(0xFF5555)), false);
+        mc.player.displayClientMessage(
+                Component.literal("[DebugBridge] " + message).withStyle(s -> s.withColor(0xFF5555)), false);
         return true;
     }
 
@@ -141,7 +170,8 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     protected boolean displayPlayerInfo(String message) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) return false;
-        mc.player.displayClientMessage(Component.literal("[DebugBridge] " + message).withStyle(s -> s.withColor(0x55FF55)), false);
+        mc.player.displayClientMessage(
+                Component.literal("[DebugBridge] " + message).withStyle(s -> s.withColor(0x55FF55)), false);
         return true;
     }
 
@@ -154,7 +184,10 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     @Override
     protected void showWarningScreen(Consumer<Boolean> onResult) {
         Minecraft mc = Minecraft.getInstance();
-        mc.setScreen(new DeveloperWarningScreen(config, accepted -> { mc.setScreen(null); onResult.accept(accepted); }));
+        mc.setScreen(new DeveloperWarningScreen(config, accepted -> {
+            mc.setScreen(null);
+            onResult.accept(accepted);
+        }));
     }
 
     private static class Minecraft1201StateProvider implements GameStateProvider {
@@ -166,10 +199,14 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
             if (player != null) {
                 SnapshotPlayerDto p = new SnapshotPlayerDto();
                 p.name = player.getName().getString();
-                p.x = player.getX(); p.y = player.getY(); p.z = player.getZ();
-                p.yaw = player.getYRot(); p.pitch = player.getXRot();
+                p.x = player.getX();
+                p.y = player.getY();
+                p.z = player.getZ();
+                p.yaw = player.getYRot();
+                p.pitch = player.getXRot();
                 p.hotbarSlot = player.getInventory().selected;
-                p.health = player.getHealth(); p.maxHealth = player.getMaxHealth();
+                p.health = player.getHealth();
+                p.maxHealth = player.getMaxHealth();
                 p.food = player.getFoodData().getFoodLevel();
                 p.saturation = player.getFoodData().getSaturationLevel();
                 p.dimension = player.level().dimension().location().toString();
@@ -181,7 +218,8 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
                 Entity vehicle = player.getVehicle();
                 if (vehicle != null) {
                     SnapshotVehicleDto v = new SnapshotVehicleDto();
-                    v.entityId = vehicle.getId(); v.type = vehicle.getClass().getName();
+                    v.entityId = vehicle.getId();
+                    v.type = vehicle.getClass().getName();
                     p.vehicle = v;
                 }
                 snap.player = p;
@@ -192,7 +230,9 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
                 t.type = hit.getType().name().toLowerCase();
                 if (hit instanceof BlockHitResult bhr) {
                     BlockPos pos = bhr.getBlockPos();
-                    t.x = pos.getX(); t.y = pos.getY(); t.z = pos.getZ();
+                    t.x = pos.getX();
+                    t.y = pos.getY();
+                    t.z = pos.getZ();
                     t.face = bhr.getDirection().name().toLowerCase();
                 } else if (hit instanceof EntityHitResult ehr) {
                     t.entityId = ehr.getEntity().getId();

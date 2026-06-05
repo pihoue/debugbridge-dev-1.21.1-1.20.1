@@ -32,12 +32,7 @@ public class Minecraft1201LookedAtEntityProvider implements LookedAtEntityProvid
                         player.getBoundingBox().expandTowards(look.scale(range)).inflate(1.0);
 
                 EntityHitResult hit = ProjectileUtil.getEntityHitResult(
-                        mc.level,
-                        player,
-                        eye,
-                        end,
-                        searchBox,
-                        e -> !e.isSpectator() && e.isPickable());
+                        mc.level, player, eye, end, searchBox, e -> !e.isSpectator() && e.isPickable());
 
                 future.complete(hit != null ? hit.getEntity().getId() : null);
             } catch (Exception e) {

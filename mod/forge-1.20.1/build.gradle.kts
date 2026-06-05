@@ -46,9 +46,6 @@ repositories {
 dependencies {
     minecraft("net.minecraftforge:forge:1.20.1-47.2.0")
 
-    // annotation processor so mixin refmap is generated correctly
-    annotationProcessor("org.spongepowered:mixin:0.8.5:processor")
-
     implementation("org.java-websocket:Java-WebSocket:1.6.0") { exclude("org.slf4j") }
     implementation("org.luaj:luaj-jse:3.0.1")
     implementation("com.google.code.gson:gson:2.14.0")
@@ -66,7 +63,7 @@ val extractLibs = tasks.register("extractBridgeLibs") {
             .forEach { jar -> project.copy { from(project.zipTree(jar)); into(out) } }
     }
 }
-tasks.named("compileJava") { dependsOn(extractLibs) }
+tasks.named("classes") { dependsOn(extractLibs) }
 
 // Merge external deps into JAR for production
 tasks.jar {
@@ -79,18 +76,6 @@ tasks.jar {
             .map { zipTree(it) }
     })
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    // Merge service files from dependency JARs (e.g. SLF4J service loader)
-    dependsOn(configurations.runtimeClasspath)
-    from({
-        configurations.runtimeClasspath.get()
-            .filter { it.name.endsWith(".jar") }
-            .filter { it.name.contains("Java-WebSocket") || it.name.contains("luaj") }
-            .map { zipTree(it) }
-    }) {
-        include("META-INF/services/*")
-        duplicatesStrategy = DuplicatesStrategy.INCLUDE // merge services
-    }
 }
 
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
