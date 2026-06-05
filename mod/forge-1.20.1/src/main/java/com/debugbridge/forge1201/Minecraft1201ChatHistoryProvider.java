@@ -48,14 +48,9 @@ public class Minecraft1201ChatHistoryProvider implements ChatHistoryProvider {
             dto.addedTime = msg.addedTime();
             if (includeJson) {
                 try {
-                    Object serializer = net.minecraft.network.chat.Component.class
-                            .getField("Serializer")
-                            .get(null);
-                    JsonElement json = (JsonElement) serializer
-                            .getClass()
-                            .getMethod("toJsonTree", net.minecraft.network.chat.Component.class)
-                            .invoke(serializer, msg.content());
-                    dto.json = json;
+                    Class<?> ser = Class.forName("net.minecraft.network.chat.Component$Serializer");
+                    dto.json = (JsonElement) ser.getMethod("toJsonTree", net.minecraft.network.chat.Component.class)
+                            .invoke(null, msg.content());
                 } catch (Exception ignore) {
                 }
             }
