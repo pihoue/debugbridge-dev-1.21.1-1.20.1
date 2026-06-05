@@ -174,7 +174,7 @@ public class Minecraft1211ItemTextureProvider implements ItemTextureProvider {
         if (quads.isEmpty()) {
             TextureAtlasSprite particle = model.getParticleIcon();
             if (particle == null) throw new Exception("No sprite found for item");
-            sprites = new TextureAtlasSprite[]{particle};
+            sprites = new TextureAtlasSprite[] {particle};
         } else {
             sprites = new TextureAtlasSprite[quads.size()];
             for (int i = 0; i < quads.size(); i++) {
