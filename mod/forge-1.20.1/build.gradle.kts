@@ -51,15 +51,14 @@ dependencies {
     implementation("com.google.code.gson:gson:2.14.0")
 }
 
-// Extract library classes into classes dir for dev TransformingClassLoader
 val extractLibs = tasks.register("extractBridgeLibs") {
     dependsOn(configurations.runtimeClasspath)
-    val out = sourceSets.main.get().output.classesDirs.singleFile
+    val out = sourceSets.main.get().output.classesDirs.first()
     inputs.files(configurations.runtimeClasspath)
     outputs.dir(out)
     doLast {
         configurations.runtimeClasspath.get()
-            .filter { it.name.contains("Java-WebSocket") || it.name.contains("luaj") }
+            .filter { it.name.contains("Java-WebSocket") || it.name.contains("luaj") || it.name.contains("gson") }
             .forEach { jar -> project.copy { from(project.zipTree(jar)); into(out) } }
     }
 }

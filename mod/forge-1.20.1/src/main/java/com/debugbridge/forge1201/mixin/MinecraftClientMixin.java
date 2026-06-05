@@ -20,8 +20,8 @@ public class MinecraftClientMixin {
         DebugBridgeMod.onRenderFrame((Minecraft) (Object) this);
     }
 
-    @Inject(method = "close", at = @At("HEAD"))
-    private void onClose(CallbackInfo ci) {
+    @Inject(method = "stop", at = @At("HEAD"))
+    private void onClientStop(CallbackInfo ci) {
         DebugBridgeMod.onClientClose((Minecraft) (Object) this);
     }
 }
