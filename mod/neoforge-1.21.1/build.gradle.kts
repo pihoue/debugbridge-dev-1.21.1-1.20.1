@@ -25,21 +25,19 @@ dependencies {
         exclude(group = "org.slf4j")
     }
     implementation("org.luaj:luaj-jse:3.0.1")
-    implementation("com.google.code.gson:gson:2.14.0")
+    // Gson version pinned to match NeoForge 21.1.x bundled version
+    implementation("com.google.code.gson:gson:2.10.1")
 
     jarJar("org.luaj:luaj-jse:3.0.1")
     jarJar("org.java-websocket:Java-WebSocket:1.6.0") {
         exclude(group = "org.slf4j")
     }
-    // Gson excluded — NeoForge bundles it already.
+    // Gson excluded from jarJar — NeoForge bundles it already.
 }
 
-configurations.configureEach {
-    if (name != "jarJar" && !name.startsWith("jarJar")) {
-        resolutionStrategy {
-            force("com.google.code.gson:gson:2.10.1")
-            force("org.slf4j:slf4j-api:2.0.9")
-        }
+configurations.implementation {
+    resolutionStrategy {
+        force("org.slf4j:slf4j-api:2.0.9")
     }
 }
 

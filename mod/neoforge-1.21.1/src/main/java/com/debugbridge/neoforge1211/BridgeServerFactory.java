@@ -39,7 +39,6 @@ public class BridgeServerFactory {
         } else {
             extLoader = new URLClassLoader(urls, BridgeServerFactory.class.getClassLoader());
         }
-        extLoader = l;
         return extLoader;
     }
 
