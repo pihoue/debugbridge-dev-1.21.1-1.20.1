@@ -23,4 +23,7 @@ environment="CLIENT"
     mandatory=true
 versionRange="[21.1,)"
 
+[[mixins]]
+config="debugbridge.mixins.json"
+
 

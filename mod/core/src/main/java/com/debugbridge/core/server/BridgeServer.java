@@ -80,6 +80,7 @@ public class BridgeServer {
     private volatile ScreenInspectProvider screenInspectProvider;
     private volatile RecordingProvider recordingProvider;
     private volatile Consumer<Exception> bindErrorCallback;
+    private volatile Runnable startCallback;
     private boolean reuseAddr = false;
     private volatile boolean runCommandEnabled = false;
 
@@ -117,6 +118,11 @@ public class BridgeServer {
         this.reuseAddr = reuse;
         var h = handle;
         if (h != null) h.setReuseAddr(reuse);
+    }
+
+    /** Set a callback invoked when the WebSocket server has bound and started. */
+    public void setStartCallback(Runnable callback) {
+        this.startCallback = callback;
     }
 
     /** Start the underlying WebSocket server. Thread-safe; actual binding
@@ -213,6 +219,8 @@ public class BridgeServer {
 
     private void onStart() {
         LOG.info("[DebugBridge] Server started on port " + getPort());
+        Runnable cb = this.startCallback;
+        if (cb != null) cb.run();
     }
 
     public LuaRuntime getLuaRuntime() {
