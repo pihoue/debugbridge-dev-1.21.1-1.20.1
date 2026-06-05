@@ -6,6 +6,7 @@ import com.debugbridge.core.protocol.dto.EntityEquipmentItemDto;
 import com.debugbridge.core.protocol.dto.EntityFrameItemDto;
 import com.debugbridge.core.protocol.dto.EntityPrimaryEquipmentDto;
 import com.debugbridge.core.protocol.dto.EntitySummaryDto;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -265,16 +266,12 @@ public class Minecraft1201NearbyEntitiesProvider implements NearbyEntitiesProvid
 
     private static ItemStack getDisplayItemStack(Display.ItemDisplay itemDisplay) {
         try {
-            for (var field : Display.ItemDisplay.class.getFields()) {
-                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())
-                        && field.getType() == net.minecraft.network.syncher.EntityDataAccessor.class) {
-                    @SuppressWarnings("unchecked")
-                    net.minecraft.network.syncher.EntityDataAccessor<ItemStack> accessor =
-                            (net.minecraft.network.syncher.EntityDataAccessor<ItemStack>) field.get(null);
-                    ItemStack stack = itemDisplay.getEntityData().get(accessor);
-                    if (stack != null) return stack;
-                }
-            }
+            Field field = Display.ItemDisplay.class.getField("DATA_ITEM_STACK_ID");
+            @SuppressWarnings("unchecked")
+            net.minecraft.network.syncher.EntityDataAccessor<ItemStack> accessor =
+                    (net.minecraft.network.syncher.EntityDataAccessor<ItemStack>) field.get(null);
+            ItemStack stack = itemDisplay.getEntityData().get(accessor);
+            if (stack != null && !stack.isEmpty()) return stack;
         } catch (Exception ignored) {
         }
         return ItemStack.EMPTY;

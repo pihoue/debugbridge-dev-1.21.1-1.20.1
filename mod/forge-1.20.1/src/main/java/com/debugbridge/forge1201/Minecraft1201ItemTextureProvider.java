@@ -401,17 +401,7 @@ public class Minecraft1201ItemTextureProvider implements ItemTextureProvider {
         if (spritePixelsField == null) {
             synchronized (Minecraft1201ItemTextureProvider.class) {
                 if (spritePixelsField == null) {
-                    Object contents = null;
-                    try {
-                        contents = sprite.getClass().getMethod("contents").invoke(sprite);
-                    } catch (NoSuchMethodException ignored) {
-                    }
-
-                    Class<?> searchClass = (contents != null) ? contents.getClass() : sprite.getClass();
-                    Field found = findNativeImageArrayField(searchClass);
-                    if (found == null && contents != null) {
-                        found = findNativeImageArrayField(sprite.getClass());
-                    }
+                    Field found = findNativeImageArrayField(sprite.getClass());
                     if (found == null) {
                         throw new Exception("Cannot locate NativeImage[] field on sprite");
                     }
@@ -422,27 +412,12 @@ public class Minecraft1201ItemTextureProvider implements ItemTextureProvider {
             }
         }
 
-        Object target;
-        if (spritePixelsField.getDeclaringClass().isInstance(sprite)) {
-            target = sprite;
-        } else {
-            target = sprite.getClass().getMethod("contents").invoke(sprite);
-        }
-
-        NativeImage[] mipmaps = (NativeImage[]) spritePixelsField.get(target);
+        NativeImage[] mipmaps = (NativeImage[]) spritePixelsField.get(sprite);
         if (mipmaps == null || mipmaps.length == 0) return null;
         return mipmaps[0];
     }
 
     private String getSpriteName(TextureAtlasSprite sprite) {
-        try {
-            Object contents = sprite.getClass().getMethod("contents").invoke(sprite);
-            if (contents != null) {
-                Object name = contents.getClass().getMethod("name").invoke(contents);
-                if (name != null) return name.toString();
-            }
-        } catch (Exception ignored) {
-        }
         try {
             Object name = sprite.getClass().getMethod("getName").invoke(sprite);
             if (name != null) return name.toString();
