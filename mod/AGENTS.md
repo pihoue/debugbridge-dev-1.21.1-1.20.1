@@ -8,12 +8,21 @@
 
 ## Building
 
-**DO NOT use command-line Gradle** — 进程无法退出 + 路径错误。只使用 IntelliJ IDE 构建工具。
+**命令行 Gradle** — 必须指定 `workdir = mod/`，否则 settings.gradle.kts 找不到。
 
 ```powershell
-# IntelliJ: Ctrl+F9 或 Run -> Build Project
-# 使用 idea_build_project 工具进行编译验证
-# 如需要运行客户端：在 Gradle 面板中找到 Tasks -> forge-1.20.1 -> runClient，双击执行
+# Build Forge 1.20.1 JAR（用 Bash 工具，设 workdir = mod/）
+$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
+gradlew.bat :forge-1.20.1:build --console=plain -q
+
+# 只运行 spotless 格式化
+gradlew.bat :forge-1.20.1:spotlessApply --console=plain -q
+
+# 运行客户端
+gradlew.bat :forge-1.20.1:runClient --console=plain
+
+# 也可以用 idea_build_project 进行编译验证
+# 用 idea_execute_run_configuration 运行构建/JAR/客户端
 ```
 
 ## Testing

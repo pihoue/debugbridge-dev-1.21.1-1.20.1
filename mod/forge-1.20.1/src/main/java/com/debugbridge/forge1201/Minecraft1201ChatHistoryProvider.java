@@ -67,9 +67,9 @@ public class Minecraft1201ChatHistoryProvider implements ChatHistoryProvider {
                     if (includeJson) {
                         try {
                             Class<?> ser = Class.forName("net.minecraft.network.chat.Component$Serializer");
-                            dto.json = (JsonElement) ser
-                                    .getMethod("toJsonTree", net.minecraft.network.chat.Component.class)
-                                    .invoke(null, msg.content());
+                            dto.json = (JsonElement)
+                                    ser.getMethod("toJsonTree", net.minecraft.network.chat.Component.class)
+                                            .invoke(null, msg.content());
                         } catch (Exception ignore) {
                         }
                     }
