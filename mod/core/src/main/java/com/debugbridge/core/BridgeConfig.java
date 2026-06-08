@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -54,29 +55,35 @@ public class BridgeConfig {
         try {
             String json = Files.readString(file);
             JsonObject obj = GSON.fromJson(json, JsonObject.class);
-            if (obj.has("port")) config.port = obj.get("port").getAsInt();
-            if (obj.has("timeout_ms")) config.timeoutMs = obj.get("timeout_ms").getAsLong();
-            if (obj.has("max_results"))
-                config.maxResults = obj.get("max_results").getAsInt();
+            if (obj.has("port")) config.port = clampPort(obj.get("port").getAsInt());
+            if (obj.has("timeout_ms")) config.timeoutMs = Math.max(100, obj.get("timeout_ms").getAsLong());
+            if (obj.has("max_results")) config.maxResults = Math.max(1, Math.min(5000, obj.get("max_results").getAsInt()));
             if (obj.has("developer_mode_accepted")) {
-                config.developerModeAccepted =
-                        obj.get("developer_mode_accepted").getAsBoolean();
+                config.developerModeAccepted = obj.get("developer_mode_accepted").getAsBoolean();
             }
             if (obj.has("run_command_enabled")) {
                 config.runCommandEnabled = obj.get("run_command_enabled").getAsBoolean();
             }
             if (obj.has("lua")) {
                 JsonObject lua = obj.getAsJsonObject("lua");
-                if (lua.has("max_execution_time_ms"))
-                    config.luaMaxExecutionTimeMs =
-                            lua.get("max_execution_time_ms").getAsLong();
+                if (lua.has("max_execution_time_ms")) {
+                    config.luaMaxExecutionTimeMs = Math.max(0, lua.get("max_execution_time_ms").getAsLong());
+                }
             }
             LOG.info("[DebugBridge] Config loaded from " + file + " (port " + config.port + ")");
             return config;
-        } catch (IOException e) {
-            LOG.warning("[DebugBridge] Failed to read config: " + e.getMessage() + ", using defaults");
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "[DebugBridge] Failed to parse config: " + e.getMessage() + ", using defaults", e);
             return config;
         }
+    }
+
+    private static int clampPort(int port) {
+        if (port < 1024 || port > 65535) {
+            LOG.warning("[DebugBridge] Config port " + port + " out of range [1024, 65535], using 9876");
+            return 9876;
+        }
+        return port;
     }
 
     /**
