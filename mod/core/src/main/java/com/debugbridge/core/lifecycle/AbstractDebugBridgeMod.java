@@ -16,11 +16,13 @@ import com.debugbridge.core.mapping.PassthroughResolver;
 import com.debugbridge.core.mapping.ProGuardParser;
 import com.debugbridge.core.recording.FrameCapturer;
 import com.debugbridge.core.recording.RecordingProvider;
+import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.server.BridgeServer;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.file.Path;
@@ -64,7 +66,7 @@ public abstract class AbstractDebugBridgeMod {
     protected final AtomicBoolean warningShown = new AtomicBoolean(false);
     protected final AtomicBoolean serverStarted = new AtomicBoolean(false);
     protected BridgeConfig config;
-    protected BridgeServer server;
+    protected volatile BridgeServer server;
     protected boolean needsWarning = false;
     protected String startupError = null;
     protected String startupInfo = null;
@@ -145,6 +147,7 @@ public abstract class AbstractDebugBridgeMod {
         server.setLookedAtEntityProvider(createLookedAtEntityProvider());
         server.setChatHistoryProvider(createChatHistoryProvider());
         server.setScreenInspectProvider(createScreenInspectProvider());
+        server.setItemRegistryProvider(createItemRegistryProvider());
         server.setRunCommandEnabled(config.runCommandEnabled);
 
         FrameCapturer frameCapturer = createFrameCapturer();
@@ -211,6 +214,8 @@ public abstract class AbstractDebugBridgeMod {
             });
             server.setStartCallback(latch::countDown);
             server.start();
+            // Wait for the async bind to complete (or fail).
+            // Java-WebSocket's start() creates a thread and binds asynchronously.
             boolean started = latch.await(5, TimeUnit.SECONDS);
             if (!started || bindFailed.get()) {
                 LOG.severe("[DebugBridge] Server failed to bind on port " + port);
@@ -219,7 +224,7 @@ public abstract class AbstractDebugBridgeMod {
                 return false;
             }
             return true;
-        } catch (Throwable e) {
+        } catch (Exception e) {
             LOG.log(Level.SEVERE, "[DebugBridge] Failed to start server on port " + port, e);
             if (server != null) {
                 try { server.stop(100); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
@@ -345,6 +350,16 @@ public abstract class AbstractDebugBridgeMod {
     protected abstract ChatHistoryProvider createChatHistoryProvider();
 
     protected abstract ScreenInspectProvider createScreenInspectProvider();
+
+    /**
+     * Build the item registry query provider. Default returns {@code null}
+     * which leaves the {@code listItems} endpoint disabled — production
+     * subclasses override with the version-specific {@link
+     * net.minecraft.core.registries.BuiltInRegistries ITEM} traversal.
+     */
+    protected ItemRegistryProvider createItemRegistryProvider() {
+        return null;
+    }
 
     /**
      * Build the per-frame capture primitive for {@code record_video}. Default

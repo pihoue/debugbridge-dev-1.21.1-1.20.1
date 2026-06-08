@@ -23,6 +23,7 @@ import com.debugbridge.core.protocol.dto.NearbyBlocksDto;
 import com.debugbridge.core.protocol.dto.NearbyEntitiesDto;
 import com.debugbridge.core.protocol.dto.ScreenInspectDto;
 import com.debugbridge.core.protocol.dto.SearchResultDto;
+import com.debugbridge.core.protocol.dto.ItemListDto;
 import com.debugbridge.core.protocol.dto.SlotDto;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.protocol.dto.StatusDto;
@@ -31,6 +32,7 @@ import com.debugbridge.core.recording.RecordingProvider;
 import com.debugbridge.core.recording.RecordingRequest;
 import com.debugbridge.core.recording.RecordingResult;
 import com.debugbridge.core.refs.ObjectRefStore;
+import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
@@ -41,6 +43,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -79,10 +85,19 @@ public class BridgeServer {
     private volatile ChatHistoryProvider chatHistoryProvider;
     private volatile ScreenInspectProvider screenInspectProvider;
     private volatile RecordingProvider recordingProvider;
+    private volatile ItemRegistryProvider itemRegistryProvider;
     private volatile Consumer<Exception> bindErrorCallback;
     private volatile Runnable startCallback;
     private boolean reuseAddr = false;
     private volatile boolean runCommandEnabled = false;
+
+    private final ExecutorService handlerExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "bridge-handler");
+        t.setDaemon(true);
+        return t;
+    });
+
+    private final ConcurrentHashMap<String, Future<?>> pendingExecutions = new ConcurrentHashMap<>();
 
     public BridgeServer(
             int port,
@@ -150,6 +165,7 @@ public class BridgeServer {
         ServerHandle(int port, boolean reuseAddr) {
             super(new InetSocketAddress("127.0.0.1", port));
             setReuseAddr(reuseAddr);
+            setConnectionLostTimeout(30);
         }
 
         @Override
@@ -184,25 +200,53 @@ public class BridgeServer {
 
     private void onClose(org.java_websocket.WebSocket conn, int code, String reason, boolean remote) {
         LOG.info("[DebugBridge] Client disconnected: " + reason);
+        for (Future<?> f : pendingExecutions.values()) {
+            f.cancel(true);
+        }
+        pendingExecutions.clear();
         refs.clear();
-        ClientEntityGlowManager.clear();
-        ClientBlockGlowManager.clear();
+        handlerExecutor.submit(() -> {
+            ClientEntityGlowManager.clear();
+            ClientBlockGlowManager.clear();
+        });
     }
 
     private void onMessage(org.java_websocket.WebSocket conn, String message) {
+        BridgeRequest req;
         try {
-            BridgeRequest req = GSON.fromJson(message, BridgeRequest.class);
-            BridgeResponse resp = handleRequest(req);
-            conn.send(GSON.toJson(resp.toJson()));
+            req = GSON.fromJson(message, BridgeRequest.class);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "[DebugBridge] Error handling message", e);
+            LOG.log(Level.WARNING, "[DebugBridge] Failed to parse message", e);
             try {
-                BridgeResponse resp = BridgeResponse.error("unknown", "Internal error: " + e.getMessage());
+                BridgeResponse resp = BridgeResponse.error("unknown", "Invalid JSON: " + e.getMessage());
                 conn.send(GSON.toJson(resp.toJson()));
-            } catch (Exception e2) {
-                // Connection may be dead
+            } catch (Exception ignored) {
             }
+            return;
         }
+        if (req.id == null || req.id.isEmpty()) {
+            req.id = "req-" + System.nanoTime();
+        }
+        dispatchAsync(req, conn);
+    }
+
+    private void dispatchAsync(BridgeRequest req, org.java_websocket.WebSocket conn) {
+        final String fId = req.id;
+        Future<?> future = handlerExecutor.submit(() -> {
+            try {
+                BridgeResponse resp = handleRequest(req);
+                conn.send(GSON.toJson(resp.toJson()));
+            } catch (Exception e) {
+                try {
+                    BridgeResponse resp = BridgeResponse.error(fId, "Internal error: " + e.getMessage());
+                    conn.send(GSON.toJson(resp.toJson()));
+                } catch (Exception ignored) {
+                }
+            } finally {
+                pendingExecutions.remove(fId);
+            }
+        });
+        pendingExecutions.put(req.id, future);
     }
 
     private void onError(org.java_websocket.WebSocket conn, Exception ex) {
@@ -269,6 +313,12 @@ public class BridgeServer {
     public void setRecordingProvider(RecordingProvider provider) {
         this.recordingProvider = provider;
         LOG.info("[DebugBridge] Recording provider registered");
+    }
+
+    public void setItemRegistryProvider(ItemRegistryProvider provider) {
+        this.itemRegistryProvider = provider;
+        LOG.info("[DebugBridge] Item registry provider registered: "
+                + provider.getClass().getSimpleName());
     }
 
     /** Exposed so the per-version mod can route render-tick callbacks through. */
@@ -345,6 +395,7 @@ public class BridgeServer {
                 case "nearbyBlocks" -> handleNearbyBlocks(req);
                 case "blockDetails" -> handleBlockDetails(req);
                 case "lookedAtEntity" -> handleLookedAtEntity(req);
+                case "listItems" -> handleListItems(req);
                 case "chatHistory" -> handleChatHistory(req);
                 case "screenInspect" -> handleScreenInspect(req);
                 case "setEntityGlow" -> handleSetEntityGlow(req);
@@ -725,7 +776,8 @@ public class BridgeServer {
             return BridgeResponse.error(req.id, "No game state provider configured. Use mc_execute with Lua instead.");
         }
         try {
-            SnapshotDto snapshot = stateProvider.captureSnapshot();
+            SnapshotDto snapshot = dispatcher.executeOnGameThread(
+                    () -> stateProvider.captureSnapshot(), 5000);
             // Class-name mapping on the two nested entity-type fields.
             if (snapshot.player != null && snapshot.player.vehicle != null) {
                 snapshot.player.vehicle.type = unresolveOrNull(snapshot.player.vehicle.type);
@@ -1087,6 +1139,29 @@ public class BridgeServer {
         } catch (Exception e) {
             return BridgeResponse.error(
                     req.id, "Screen inspect failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    private BridgeResponse handleListItems(BridgeRequest req) {
+        if (itemRegistryProvider == null) {
+            return BridgeResponse.error(req.id, "No item registry provider configured for this Minecraft version.");
+        }
+        String filter = (req.payload != null && req.payload.has("filter"))
+                ? req.payload.get("filter").getAsString()
+                : null;
+        int limit = 500;
+        if (req.payload != null && req.payload.has("limit")) {
+            limit = Math.max(1, Math.min(5000, req.payload.get("limit").getAsInt()));
+        }
+        if (filter != null && filter.length() > 256) {
+            return BridgeResponse.error(req.id, "filter too long (max 256 chars)");
+        }
+        try {
+            ItemRegistryProvider.ListResult result = itemRegistryProvider.listItems(filter, limit);
+            ItemListDto dto = new ItemListDto(result.items(), result.total());
+            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(dto), null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "Item list query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 

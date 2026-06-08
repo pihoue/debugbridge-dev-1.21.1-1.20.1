@@ -68,8 +68,11 @@ public class JavaClassWrapper extends LuaUserdata {
             try {
                 field.setAccessible(true);
                 final Field f = field;
+                bridge.checkDispatchBudget();
                 Object value = bridge.getDispatcher().executeOnGameThread(() -> f.get(null), 5000);
                 return bridge.wrapJavaValue(value);
+            } catch (LuaError e) {
+                throw e;
             } catch (Exception e) {
                 // Fall through to method wrapper
             }

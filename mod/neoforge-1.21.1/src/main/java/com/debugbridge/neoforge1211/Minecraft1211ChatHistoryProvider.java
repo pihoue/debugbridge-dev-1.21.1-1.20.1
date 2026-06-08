@@ -9,6 +9,8 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import net.minecraft.client.GuiMessage;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.ChatComponent;
@@ -21,44 +23,65 @@ public class Minecraft1211ChatHistoryProvider implements ChatHistoryProvider {
     private static Field allMessagesField(MappingResolver resolver) throws NoSuchFieldException {
         Field f = allMessagesField;
         if (f != null) return f;
-        String runtime = resolver.resolveField("net.minecraft.client.gui.components.ChatComponent", "allMessages");
-        f = ChatComponent.class.getDeclaredField(runtime);
-        f.setAccessible(true);
-        allMessagesField = f;
-        return f;
+        synchronized (Minecraft1211ChatHistoryProvider.class) {
+            f = allMessagesField;
+            if (f != null) return f;
+            String runtime = resolver.resolveField("net.minecraft.client.gui.components.ChatComponent", "allMessages");
+            f = ChatComponent.class.getDeclaredField(runtime);
+            f.setAccessible(true);
+            allMessagesField = f;
+            return f;
+        }
     }
 
     @Override
     public List<ChatMessageDto> getRecentMessages(int limit, MappingResolver resolver, boolean includeJson)
             throws Exception {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.gui == null) return Collections.emptyList();
-        ChatComponent chat = mc.gui.getChat();
-        if (chat == null) return Collections.emptyList();
-
-        @SuppressWarnings("unchecked")
-        List<GuiMessage> messages =
-                (List<GuiMessage>) allMessagesField(resolver).get(chat);
-        if (messages == null) return Collections.emptyList();
-
-        int n = Math.min(limit, messages.size());
-        List<ChatMessageDto> out = new ArrayList<>(n);
-        for (int i = 0; i < n; i++) {
-            GuiMessage msg = messages.get(i);
-            ChatMessageDto dto = new ChatMessageDto();
-            dto.plain = msg.content().getString();
-            dto.addedTime = msg.addedTime();
-            if (includeJson) {
-                try {
-                    JsonElement json = ComponentSerialization.CODEC
-                            .encodeStart(JsonOps.INSTANCE, msg.content())
-                            .getOrThrow();
-                    dto.json = json;
-                } catch (Exception ignore) {
+        CompletableFuture<List<ChatMessageDto>> future = new CompletableFuture<>();
+        mc.execute(() -> {
+            try {
+                if (mc.gui == null) {
+                    future.complete(Collections.emptyList());
+                    return;
                 }
+                ChatComponent chat = mc.gui.getChat();
+                if (chat == null) {
+                    future.complete(Collections.emptyList());
+                    return;
+                }
+
+                @SuppressWarnings("unchecked")
+                List<GuiMessage> messages =
+                        (List<GuiMessage>) allMessagesField(resolver).get(chat);
+                if (messages == null) {
+                    future.complete(Collections.emptyList());
+                    return;
+                }
+
+                int n = Math.min(limit, messages.size());
+                List<ChatMessageDto> out = new ArrayList<>(n);
+                for (int i = 0; i < n; i++) {
+                    GuiMessage msg = messages.get(i);
+                    ChatMessageDto dto = new ChatMessageDto();
+                    dto.plain = msg.content().getString();
+                    dto.addedTime = msg.addedTime();
+                    if (includeJson) {
+                        try {
+                            JsonElement json = ComponentSerialization.CODEC
+                                    .encodeStart(JsonOps.INSTANCE, msg.content())
+                                    .getOrThrow();
+                            dto.json = json;
+                        } catch (Exception ignore) {
+                        }
+                    }
+                    out.add(dto);
+                }
+                future.complete(out);
+            } catch (Exception e) {
+                future.completeExceptionally(e);
             }
-            out.add(dto);
-        }
-        return out;
+        });
+        return future.get(5, TimeUnit.SECONDS);
     }
 }
