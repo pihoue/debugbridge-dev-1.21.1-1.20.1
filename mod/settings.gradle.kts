@@ -2,6 +2,7 @@ pluginManagement {
     repositories {
         maven("https://maven.minecraftforge.net/")
         maven("https://maven.neoforged.net/releases/")
+        maven("https://maven.muon.rip/releases")
         gradlePluginPortal()
         mavenCentral()
     }

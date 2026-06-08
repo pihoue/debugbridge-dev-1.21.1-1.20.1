@@ -4,6 +4,7 @@ import com.debugbridge.core.block.NearbyBlocksProvider;
 import com.debugbridge.core.chat.ChatHistoryProvider;
 import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
+import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.lifecycle.AbstractDebugBridgeMod;
 import com.debugbridge.core.mapping.FabricNamespaceLookup;
 import com.debugbridge.core.mapping.MappingCache;
@@ -155,6 +156,11 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     @Override
     protected ScreenInspectProvider createScreenInspectProvider() {
         return new Minecraft1201ScreenInspectProvider();
+    }
+
+    @Override
+    protected ItemRegistryProvider createItemRegistryProvider() {
+        return new Minecraft1201ItemRegistryProvider();
     }
 
     @Override

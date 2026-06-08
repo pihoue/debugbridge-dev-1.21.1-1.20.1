@@ -148,6 +148,7 @@ public class MethodCallWrapper extends org.luaj.vm2.lib.VarArgFunction {
             Object[] convertedArgs = convertArgs(javaArgs, method.getParameterTypes());
 
             final Method finalMethod = method;
+            bridge.checkDispatchBudget();
             Object result =
                     bridge.getDispatcher().executeOnGameThread(() -> finalMethod.invoke(target, convertedArgs), 5000);
 

@@ -82,6 +82,7 @@ public class JavaObjectWrapper extends LuaUserdata {
             try {
                 field.setAccessible(true);
                 final java.lang.reflect.Field f = field;
+                bridge.checkDispatchBudget();
                 Object value = bridge.getDispatcher().executeOnGameThread(() -> f.get(javaObject), 5000);
                 LuaValue wrapped = bridge.wrapJavaValue(value);
                 // Tag the returned wrapper so if the caller tries to invoke it
@@ -91,6 +92,8 @@ public class JavaObjectWrapper extends LuaUserdata {
                     childWrapper.setOrigin(new AccessOrigin(name, mojangTypeName, declaredType, javaObject));
                 }
                 return wrapped;
+            } catch (LuaError e) {
+                throw e;
             } catch (Exception e) {
                 // Fall through to method wrapper
             }
@@ -115,6 +118,7 @@ public class JavaObjectWrapper extends LuaUserdata {
             }
             field.setAccessible(true);
             Object javaValue = bridge.unwrapLuaValue(value, field.getType());
+            bridge.checkDispatchBudget();
             bridge.getDispatcher()
                     .executeOnGameThread(
                             () -> {

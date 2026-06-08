@@ -4,7 +4,7 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -33,9 +33,9 @@ public class FabricMojangResolver implements MappingResolver {
     private final String version;
     private final ParsedMappings mappings;
     private final FabricNamespaceLookup lookup;
-    private final Map<String, String> intermediaryToMojang = new HashMap<>();
-    private final Map<String, String> methodCache = new HashMap<>();
-    private final Map<String, String> fieldCache = new HashMap<>();
+    private final Map<String, String> intermediaryToMojang = new ConcurrentHashMap<>();
+    private final Map<String, String> methodCache = new ConcurrentHashMap<>();
+    private final Map<String, String> fieldCache = new ConcurrentHashMap<>();
 
     public FabricMojangResolver(String version, ParsedMappings mappings, FabricNamespaceLookup lookup) {
         this.version = version;

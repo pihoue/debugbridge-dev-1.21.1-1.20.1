@@ -8,14 +8,12 @@
 
 ## Building
 
-```powershell
-# Forge 1.20.1
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
-.\gradlew.bat :forge-1.20.1:runClient --console=plain
+**DO NOT use command-line Gradle** — 进程无法退出 + 路径错误。只使用 IntelliJ IDE 构建工具。
 
-# NeoForge 1.21.1
-$env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
-.\gradlew.bat :neoforge-1.21.1:runClient --console=plain
+```powershell
+# IntelliJ: Ctrl+F9 或 Run -> Build Project
+# 使用 idea_build_project 工具进行编译验证
+# 如需要运行客户端：在 Gradle 面板中找到 Tasks -> forge-1.20.1 -> runClient，双击执行
 ```
 
 ## Testing

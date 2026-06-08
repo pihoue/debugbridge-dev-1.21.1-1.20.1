@@ -5,6 +5,7 @@ import com.debugbridge.core.refs.ObjectRefStore;
 import java.lang.reflect.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.luaj.vm2.LuaError;
 import org.luaj.vm2.LuaTable;
 import org.luaj.vm2.LuaValue;
@@ -26,6 +27,21 @@ public class JavaBridge {
     private final Map<String, Class<?>> classCache = new ConcurrentHashMap<>();
     private final Map<Class<?>, Map<String, String>> reverseMethodCache = new ConcurrentHashMap<>();
 
+    /**
+     * Per-execution budget that limits how many game-thread dispatches a
+     * single Lua script can make. Each field access or method call from Lua
+     * consumes one unit. When the budget is exhausted, the script is aborted
+     * with a descriptive error that suggests native endpoints instead.
+     * <p>
+     * The limit prevents runaway scripts from flooding the game thread with
+     * thousands of tasks — a single call to {@code Iterable.forEach()} on
+     * the 12000+ entry item registry, with 3+ dispatch per item (field
+     * access + method call + toString), can easily lock the game thread and
+     * cause the WebSocket to time out.
+     */
+    private static final int MAX_DISPATCH_BUDGET = 5000;
+    private final AtomicInteger dispatchBudget = new AtomicInteger(0);
+
     public JavaBridge(MappingResolver resolver, ThreadDispatcher dispatcher, ObjectRefStore refs) {
         this.resolver = resolver;
         this.dispatcher = dispatcher;
@@ -42,6 +58,32 @@ public class JavaBridge {
 
     public ObjectRefStore getRefs() {
         return refs;
+    }
+
+    /**
+     * Reset the per-execution dispatch budget. Called by
+     * {@code LuaRuntime} at the start of each script execution.
+     */
+    public void resetDispatchBudget() {
+        dispatchBudget.set(MAX_DISPATCH_BUDGET);
+    }
+
+    /**
+     * Consume one unit from the dispatch budget.
+     * @throws LuaError if the budget is exhausted
+     */
+    public void checkDispatchBudget() {
+        int remaining = dispatchBudget.decrementAndGet();
+        if (remaining < 0) {
+            throw new LuaError(
+                    "Script exceeded the Lua→Java dispatch budget ("
+                            + MAX_DISPATCH_BUDGET
+                            + " game-thread calls). "
+                            + "Use native endpoints (nearbyEntities, getItemTexture, screenInspect, etc.) "
+                            + "for bulk operations that iterate over many objects. "
+                            + "Each field access and method call from Lua dispatches to the game thread "
+                            + "and has per-call overhead — large loops will lock the game thread.");
+        }
     }
 
     /**

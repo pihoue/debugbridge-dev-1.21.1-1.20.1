@@ -1,5 +1,6 @@
 plugins {
     id("com.diffplug.spotless") version "8.5.1" apply false
+    id("dev.mixinmcp.decompile") version "0.9.0"
 }
 
 allprojects {

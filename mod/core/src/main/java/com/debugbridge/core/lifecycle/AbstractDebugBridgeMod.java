@@ -16,6 +16,7 @@ import com.debugbridge.core.mapping.PassthroughResolver;
 import com.debugbridge.core.mapping.ProGuardParser;
 import com.debugbridge.core.recording.FrameCapturer;
 import com.debugbridge.core.recording.RecordingProvider;
+import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.server.BridgeServer;
@@ -65,7 +66,7 @@ public abstract class AbstractDebugBridgeMod {
     protected final AtomicBoolean warningShown = new AtomicBoolean(false);
     protected final AtomicBoolean serverStarted = new AtomicBoolean(false);
     protected BridgeConfig config;
-    protected BridgeServer server;
+    protected volatile BridgeServer server;
     protected boolean needsWarning = false;
     protected String startupError = null;
     protected String startupInfo = null;
@@ -146,6 +147,7 @@ public abstract class AbstractDebugBridgeMod {
         server.setLookedAtEntityProvider(createLookedAtEntityProvider());
         server.setChatHistoryProvider(createChatHistoryProvider());
         server.setScreenInspectProvider(createScreenInspectProvider());
+        server.setItemRegistryProvider(createItemRegistryProvider());
         server.setRunCommandEnabled(config.runCommandEnabled);
 
         FrameCapturer frameCapturer = createFrameCapturer();
@@ -348,6 +350,16 @@ public abstract class AbstractDebugBridgeMod {
     protected abstract ChatHistoryProvider createChatHistoryProvider();
 
     protected abstract ScreenInspectProvider createScreenInspectProvider();
+
+    /**
+     * Build the item registry query provider. Default returns {@code null}
+     * which leaves the {@code listItems} endpoint disabled — production
+     * subclasses override with the version-specific {@link
+     * net.minecraft.core.registries.BuiltInRegistries ITEM} traversal.
+     */
+    protected ItemRegistryProvider createItemRegistryProvider() {
+        return null;
+    }
 
     /**
      * Build the per-frame capture primitive for {@code record_video}. Default

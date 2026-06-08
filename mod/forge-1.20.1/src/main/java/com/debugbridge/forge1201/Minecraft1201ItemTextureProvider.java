@@ -314,7 +314,11 @@ public class Minecraft1201ItemTextureProvider implements ItemTextureProvider {
     private NativeImage fetchSkin(String url) throws Exception {
         NativeImage cached = SKIN_CACHE.get(url);
         if (cached != null) return cached;
-        try (InputStream in = new URL(url).openStream()) {
+        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(3000);
+        conn.setReadTimeout(5000);
+        conn.setInstanceFollowRedirects(true);
+        try (InputStream in = conn.getInputStream()) {
             NativeImage img = NativeImage.read(in);
             NativeImage prev = SKIN_CACHE.putIfAbsent(url, img);
             if (prev != null) {
@@ -322,6 +326,8 @@ public class Minecraft1201ItemTextureProvider implements ItemTextureProvider {
                 return prev;
             }
             return img;
+        } finally {
+            conn.disconnect();
         }
     }
 
