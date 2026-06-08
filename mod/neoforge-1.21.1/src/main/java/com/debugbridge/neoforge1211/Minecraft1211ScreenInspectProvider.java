@@ -48,7 +48,9 @@ public class Minecraft1211ScreenInspectProvider implements ScreenInspectProvider
                         ItemStack stack = slot.getItem();
                         if (!stack.isEmpty()) {
                             ItemStackDto item = new ItemStackDto();
-                            item.itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                            item.itemId = BuiltInRegistries.ITEM
+                                    .getKey(stack.getItem())
+                                    .toString();
                             item.count = stack.getCount();
                             if (stack.isDamageableItem()) {
                                 item.damage = stack.getDamageValue();
