@@ -35,6 +35,13 @@ public class BridgeConfig {
     public boolean runCommandEnabled = false;
 
     /**
+     * Session control (disconnect / joinServer / quit) via the bridge. Off by
+     * default — these endpoints can tear down the user's play session or close
+     * the client, so they're opt-in for automation setups only.
+     */
+    public boolean sessionControlEnabled = false;
+
+    /**
      * Path to the config file, set when loaded.
      */
     private transient Path configFile;
@@ -64,6 +71,10 @@ public class BridgeConfig {
             }
             if (obj.has("run_command_enabled")) {
                 config.runCommandEnabled = obj.get("run_command_enabled").getAsBoolean();
+            }
+            if (obj.has("session_control_enabled")) {
+                config.sessionControlEnabled =
+                        obj.get("session_control_enabled").getAsBoolean();
             }
             // Prefer the "script" block; accept the legacy "lua" key for back-compat.
             JsonObject scriptCfg = null;
@@ -96,6 +107,7 @@ public class BridgeConfig {
             obj.addProperty("max_results", maxResults);
             obj.addProperty("developer_mode_accepted", developerModeAccepted);
             obj.addProperty("run_command_enabled", runCommandEnabled);
+            obj.addProperty("session_control_enabled", sessionControlEnabled);
             JsonObject scriptCfg = new JsonObject();
             scriptCfg.addProperty("max_execution_time_ms", scriptMaxExecutionTimeMs);
             obj.add("script", scriptCfg);

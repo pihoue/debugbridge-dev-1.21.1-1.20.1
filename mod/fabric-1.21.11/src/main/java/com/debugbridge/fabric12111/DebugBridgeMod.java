@@ -16,6 +16,7 @@ import com.debugbridge.core.protocol.dto.Vec3Dto;
 import com.debugbridge.core.recording.FrameCapturer;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
+import com.debugbridge.core.session.SessionControlProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
 import java.nio.file.Path;
@@ -129,6 +130,11 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod implements ClientModI
     @Override
     protected ScreenInspectProvider createScreenInspectProvider() {
         return new Minecraft12111ScreenInspectProvider();
+    }
+
+    @Override
+    protected SessionControlProvider createSessionControlProvider() {
+        return new Minecraft12111SessionControlProvider();
     }
 
     @Override

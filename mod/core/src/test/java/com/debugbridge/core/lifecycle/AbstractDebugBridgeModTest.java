@@ -206,6 +206,11 @@ class AbstractDebugBridgeModTest {
         }
 
         @Override
+        protected com.debugbridge.core.session.SessionControlProvider createSessionControlProvider() {
+            return null;
+        }
+
+        @Override
         protected boolean displayPlayerError(String m) {
             if (!playerReady) return false;
             errorsDisplayed.add(m);

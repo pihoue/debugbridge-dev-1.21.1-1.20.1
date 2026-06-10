@@ -4,7 +4,7 @@
 A Fabric client mod (Minecraft 1.19, 1.21.11, and 26.2-dev snapshot) that exposes a local WebSocket server for a Vue web UI and for MCP clients to introspect/control the running client. Used for dev-time debugging, not gameplay.
 
 ## Repo layout
-- `mod/core/` — shared Java: WebSocket server (`BridgeServer`), Groovy runtime, mapping resolver, provider interfaces (`NearbyEntitiesProvider`, `NearbyBlocksProvider`, `LookedAtEntityProvider`, `ScreenshotProvider`, `ItemTextureProvider`, `ScreenInspectProvider`, `ChatHistoryProvider`, `GameStateProvider`, `FrameCapturer` + recording orchestrator).
+- `mod/core/` — shared Java: WebSocket server (`BridgeServer`), Groovy runtime, mapping resolver, provider interfaces (`NearbyEntitiesProvider`, `NearbyBlocksProvider`, `LookedAtEntityProvider`, `ScreenshotProvider`, `ItemTextureProvider`, `ScreenInspectProvider`, `ChatHistoryProvider`, `GameStateProvider`, `SessionControlProvider`, `FrameCapturer` + recording orchestrator).
 - `mod/fabric-1.19/`, `mod/fabric-1.21.11/`, `mod/fabric-26.2-dev/` — version-specific Fabric mods. Each has its own provider impls + mixins.
 - `web-ui/` — Vue 3 + Pinia + Tailwind app.
 - `build-and-deploy.sh` (1.19) and `build-and-deploy-1.21.11.sh` — build the jar and copy into `~/Library/Application Support/ModrinthApp/profiles/ImagineFun/mods/`.
@@ -58,6 +58,13 @@ Do NOT iterate entities/blocks, resolve textures, scan inventories, or read chat
   - Protocol contract lives at `../mcdev-mcp/docs/RECORD_VIDEO_PROTOCOL.md` — that's the canonical spec; mirror changes there if you touch the wire.
   - `BUSY` is enforced both for concurrent `record_video` requests and for single-shot `screenshot` calls while a recording is in progress (shared render thread).
   - Cleanup policy: leak. Files accumulate in `debugbridge-recordings/` until manually wiped. Subdir-per-recording layout exists so a future retention sweep is one `find … -mtime` away.
+
+## Session control (automation)
+- `disconnect` / `joinServer` / `quit` via `SessionControlProvider` — lets an external orchestrator (MCP server) drive disconnect → relaunch → rejoin loops without human interaction.
+- Gated behind `session_control_enabled` in `debugbridge.json` (off by default, same posture as `run_command_enabled`). `status` reports the capability as `sessionControlEnabled`.
+- All three are fire-and-acknowledge: the provider queues the operation on the game thread and the response returns immediately. Poll `snapshot` (player present = in world) and `screenInspect` (e.g. DisconnectedScreen) for the outcome.
+- `joinServer` payload: `{address, acceptResourcePacks?}` (default true — pre-accepts the server resource pack so the join flow doesn't stall on the prompt).
+- Relaunching the client is necessarily external — the JVM can't restart itself. The orchestrator handles launch (e.g. `prismlauncher --launch <instance>`), then polls the bridge port range until `status` answers.
 
 ## 1.19 vs 1.21.11 API quirks
 - `GameProfile.name()` (record accessor) in 1.21.11 vs `GameProfile.getName()` in 1.19.

@@ -19,6 +19,7 @@ import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.script.ThreadDispatcher;
 import com.debugbridge.core.server.BridgeServer;
+import com.debugbridge.core.session.SessionControlProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
 import java.net.InetSocketAddress;
@@ -145,6 +146,11 @@ public abstract class AbstractDebugBridgeMod {
         server.setChatHistoryProvider(createChatHistoryProvider());
         server.setScreenInspectProvider(createScreenInspectProvider());
         server.setRunCommandEnabled(config.runCommandEnabled);
+        SessionControlProvider sessionControl = createSessionControlProvider();
+        if (sessionControl != null) {
+            server.setSessionControlProvider(sessionControl);
+        }
+        server.setSessionControlEnabled(config.sessionControlEnabled);
 
         FrameCapturer frameCapturer = createFrameCapturer();
         Path gd = gameDir();
@@ -326,6 +332,8 @@ public abstract class AbstractDebugBridgeMod {
     protected abstract ChatHistoryProvider createChatHistoryProvider();
 
     protected abstract ScreenInspectProvider createScreenInspectProvider();
+
+    protected abstract SessionControlProvider createSessionControlProvider();
 
     /**
      * Build the per-frame capture primitive for {@code record_video}. Default

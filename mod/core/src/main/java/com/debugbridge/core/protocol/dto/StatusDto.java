@@ -17,6 +17,12 @@ public final class StatusDto {
     public boolean obfuscated;
     public int refs;
 
+    /**
+     * Whether the session-control endpoints (disconnect / joinServer / quit)
+     * are available, so automation clients can discover the capability.
+     */
+    public boolean sessionControlEnabled;
+
     // Optional log-path block. Populated together when gameDir is non-null.
     public String gameDir;
     public String logsDir;

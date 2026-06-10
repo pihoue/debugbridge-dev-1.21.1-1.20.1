@@ -32,6 +32,7 @@ import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.script.ScriptRuntime;
 import com.debugbridge.core.script.ThreadDispatcher;
+import com.debugbridge.core.session.SessionControlProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
 import com.google.gson.*;
@@ -131,6 +132,18 @@ public class BridgeServer extends WebSocketServer {
      */
     private volatile boolean runCommandEnabled = false;
 
+    /**
+     * Session control (disconnect / joinServer / quit). Set by the
+     * version-specific module; only honored when {@link #sessionControlEnabled}.
+     */
+    private volatile SessionControlProvider sessionControlProvider;
+
+    /**
+     * Whether session-control endpoints are honored. Off by default — they can
+     * tear down the user's play session, so automation setups opt in via config.
+     */
+    private volatile boolean sessionControlEnabled = false;
+
     public BridgeServer(int port, MappingResolver resolver, ThreadDispatcher dispatcher) {
         this(port, resolver, dispatcher, null, null);
     }
@@ -171,6 +184,16 @@ public class BridgeServer extends WebSocketServer {
 
     public void setRunCommandEnabled(boolean enabled) {
         this.runCommandEnabled = enabled;
+    }
+
+    public void setSessionControlEnabled(boolean enabled) {
+        this.sessionControlEnabled = enabled;
+    }
+
+    public void setSessionControlProvider(SessionControlProvider provider) {
+        this.sessionControlProvider = provider;
+        LOG.info("[DebugBridge] Session control provider registered: "
+                + provider.getClass().getSimpleName());
     }
 
     public void setChatHistoryProvider(ChatHistoryProvider provider) {
@@ -320,6 +343,9 @@ public class BridgeServer extends WebSocketServer {
                 case "setEntityGlow" -> handleSetEntityGlow(req);
                 case "setBlockGlow" -> handleSetBlockGlow(req);
                 case "clearBlockGlow" -> handleClearBlockGlow(req);
+                case "disconnect" -> handleDisconnect(req);
+                case "joinServer" -> handleJoinServer(req);
+                case "quit" -> handleQuit(req);
                 default -> BridgeResponse.error(req.id, "Unknown request type: " + req.type);
             };
         } catch (Exception e) {
@@ -773,6 +799,83 @@ public class BridgeServer extends WebSocketServer {
         return handleExecute(new BridgeRequest(req.id, "execute", createPayload("code", groovyCode)));
     }
 
+    // ==================== Session Control Handlers ====================
+
+    /** Hard cap on `joinServer` address length. */
+    private static final int MAX_ADDRESS_LEN = 256;
+
+    /**
+     * Common gate for session-control endpoints. Returns an error response when
+     * the feature is disabled or unavailable, or null when the request may
+     * proceed. Unlike runCommand these report an explicit "disabled" error —
+     * automation needs an actionable message, not a missing endpoint.
+     */
+    private BridgeResponse sessionControlGate(BridgeRequest req) {
+        if (!sessionControlEnabled) {
+            return BridgeResponse.error(
+                    req.id,
+                    "Session control is disabled. Set session_control_enabled=true in debugbridge.json and restart.");
+        }
+        if (sessionControlProvider == null) {
+            return BridgeResponse.error(req.id, "No session control provider configured for this Minecraft version.");
+        }
+        return null;
+    }
+
+    private BridgeResponse handleDisconnect(BridgeRequest req) {
+        BridgeResponse gate = sessionControlGate(req);
+        if (gate != null) return gate;
+        try {
+            sessionControlProvider.disconnect();
+            JsonObject result = new JsonObject();
+            result.addProperty("status", "disconnecting");
+            return BridgeResponse.success(req.id, result, null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "disconnect failed: " + e.getMessage());
+        }
+    }
+
+    private BridgeResponse handleJoinServer(BridgeRequest req) {
+        BridgeResponse gate = sessionControlGate(req);
+        if (gate != null) return gate;
+        if (req.payload == null
+                || !req.payload.has("address")
+                || !req.payload.get("address").isJsonPrimitive()) {
+            return BridgeResponse.error(req.id, "joinServer: 'address' must be a string");
+        }
+        String address = req.payload.get("address").getAsString().trim();
+        if (address.isEmpty() || address.length() > MAX_ADDRESS_LEN) {
+            return BridgeResponse.error(req.id, "joinServer: 'address' must be 1-" + MAX_ADDRESS_LEN + " chars");
+        }
+        boolean acceptResourcePacks = true;
+        if (req.payload.has("acceptResourcePacks")
+                && req.payload.get("acceptResourcePacks").isJsonPrimitive()) {
+            acceptResourcePacks = req.payload.get("acceptResourcePacks").getAsBoolean();
+        }
+        try {
+            sessionControlProvider.joinServer(address, acceptResourcePacks);
+            JsonObject result = new JsonObject();
+            result.addProperty("status", "connecting");
+            result.addProperty("address", address);
+            return BridgeResponse.success(req.id, result, null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "joinServer failed: " + e.getMessage());
+        }
+    }
+
+    private BridgeResponse handleQuit(BridgeRequest req) {
+        BridgeResponse gate = sessionControlGate(req);
+        if (gate != null) return gate;
+        try {
+            sessionControlProvider.quit();
+            JsonObject result = new JsonObject();
+            result.addProperty("status", "quitting");
+            return BridgeResponse.success(req.id, result, null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "quit failed: " + e.getMessage());
+        }
+    }
+
     /** Hard cap on `runCommand` input length. */
     private static final int MAX_COMMAND_LEN = 1024;
 
@@ -782,6 +885,7 @@ public class BridgeServer extends WebSocketServer {
         dto.mappingStatus = resolver.isObfuscated() ? "mojang" : "passthrough";
         dto.obfuscated = resolver.isObfuscated();
         dto.refs = refs.size();
+        dto.sessionControlEnabled = sessionControlEnabled && sessionControlProvider != null;
 
         // Expose the game dir and log paths so a connecting client can read the
         // log via its own file-read tools. We always expose the path we *would*

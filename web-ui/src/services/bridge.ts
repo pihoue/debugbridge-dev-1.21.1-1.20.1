@@ -288,6 +288,27 @@ class BridgeService {
     const resp = await this.send('clearBlockGlow', {});
     if (!resp.success) throw new Error(resp.error || 'Clear block glow failed');
   }
+
+  // Session control (gated behind session_control_enabled in debugbridge.json).
+  // All three resolve as soon as the request is acknowledged; the operation
+  // completes asynchronously in-game — poll snapshot/screenInspect for outcome.
+
+  /** Leave the current world/server (wire type "disconnect" — named to avoid
+   *  clashing with the WebSocket disconnect() above). */
+  async leaveServer(): Promise<void> {
+    const resp = await this.send('disconnect', {});
+    if (!resp.success) throw new Error(resp.error || 'Leave server failed');
+  }
+
+  async joinServer(address: string, acceptResourcePacks = true): Promise<void> {
+    const resp = await this.send('joinServer', { address, acceptResourcePacks });
+    if (!resp.success) throw new Error(resp.error || 'Join server failed');
+  }
+
+  async quit(): Promise<void> {
+    const resp = await this.send('quit', {});
+    if (!resp.success) throw new Error(resp.error || 'Quit failed');
+  }
 }
 
 // Singleton instance
