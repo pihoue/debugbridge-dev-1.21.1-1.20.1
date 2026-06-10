@@ -31,10 +31,19 @@ export interface ObjectInfo {
 }
 
 /**
+ * Quote a value as a Groovy single-quoted string literal. Double-quoted Groovy
+ * strings are GStrings and interpolate `$`, which breaks inner-class names
+ * like `Display$TextDisplay`; single-quoted strings are inert.
+ */
+function groovyString(s: string): string {
+  return `'${s.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
+/**
  * Import a class and get its static fields/methods
  */
 export async function inspectClass(className: string): Promise<ObjectInfo> {
-  const code = `return java.describe(java.type("${className}"))`;
+  const code = `return java.describe(java.type(${groovyString(className)}))`;
 
   const result = await bridge.execute(code);
   if (!result.success) {
@@ -50,7 +59,7 @@ export async function inspectClass(className: string): Promise<ObjectInfo> {
 export async function callStaticMethod(className: string, methodName: string, args: string[] = []): Promise<ObjectInfo> {
   const argsStr = args.join(', ');
   const code = `
-    def cls = java.type("${className}")
+    def cls = java.type(${groovyString(className)})
     def result = cls.${methodName}(${argsStr})
     if (result == null) return [isNull: true]
     return java.describe(result)

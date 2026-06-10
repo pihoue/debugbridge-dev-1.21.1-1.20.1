@@ -35,8 +35,10 @@ Run Groovy scripts inside the Minecraft JVM with full access to Minecraft APIs v
 println "Player at: " + player.blockPosition().toShortString()
 println "Dimension: " + mc.level.dimension().location()
 
-// Load anything else by Mojang name (works on obfuscated builds too)
-def Vec3 = java.type("net.minecraft.world.phys.Vec3")
+// Load anything else by Mojang name (works on obfuscated builds too).
+// Prefer single quotes: double-quoted GStrings interpolate the $ in
+// inner-class names like Display$TextDisplay.
+def Vec3 = java.type('net.minecraft.world.phys.Vec3')
 
 // Iterate Java collections. Wrap a bulk loop in sync { } so the per-call
 // reflective dispatch batches into a single game-thread hop.

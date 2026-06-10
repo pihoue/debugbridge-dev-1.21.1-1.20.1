@@ -16,8 +16,9 @@ import java.util.Set;
  *
  * <p>On obfuscated builds Groovy can't name {@code net.minecraft.*} classes
  * directly (the runtime class is {@code class_NNNN}), so construction goes
- * through here: {@code def Vec3 = java.type("net.minecraft.world.phys.Vec3");
- * Vec3(1,2,3)} or {@code Vec3.create(1,2,3)}.
+ * through here: {@code def Vec3 = java.type('net.minecraft.world.phys.Vec3');
+ * Vec3(1,2,3)} or {@code Vec3.create(1,2,3)}. (Single-quote the name: a
+ * double-quoted GString interpolates the {@code $} in inner-class names.)
  */
 public class GroovyJavaClass extends GroovyObjectSupport {
     private final Class<?> javaClass;

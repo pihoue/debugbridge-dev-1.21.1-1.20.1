@@ -100,7 +100,7 @@ function handlePin() {
           <li><code class="text-blue-300">return mc</code></li>
           <li><code class="text-blue-300">return player.blockPosition()</code></li>
           <li><code class="text-blue-300">return level.entitiesForRendering()</code></li>
-          <li><code class="text-blue-300">return java.type("net.minecraft.client.Minecraft")</code></li>
+          <li><code class="text-blue-300">return java.type('net.minecraft.client.Minecraft')</code></li>
         </ul>
         <p class="text-xs mt-3 text-zinc-600">
           Click ▶ to drill into Java objects. Double-click a row to copy its Groovy path.
