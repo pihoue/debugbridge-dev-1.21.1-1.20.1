@@ -302,8 +302,11 @@ class BridgeService {
   }
 
   // Session control (gated behind session_control_enabled in debugbridge.json).
-  // All three resolve as soon as the request is acknowledged; the operation
-  // completes asynchronously in-game — poll snapshot/screenInspect for outcome.
+  // leaveServer/quit resolve as soon as the request is acknowledged and
+  // complete asynchronously in-game. joinServer acks once the connect attempt
+  // has started — the bridge defers it until the client settles (no loading
+  // overlay), so it can take extra seconds right after client launch. Either
+  // way, poll snapshot/screenInspect for the outcome.
 
   /** Leave the current world/server (wire type "disconnect" — named to avoid
    *  clashing with the WebSocket disconnect() above). */
