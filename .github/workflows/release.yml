@@ -106,49 +106,71 @@ jobs:
           body: |
             ## DebugBridge v${{ steps.version.outputs.VERSION }}
 
-            Lua-Java bridge for Minecraft: a WebSocket REPL into the running client.
+            Groovy-Java bridge for Minecraft: a WebSocket REPL into the running client.
 
             ### Installation
             1. Install Fabric Loader for your Minecraft version
             2. Drop the appropriate JAR into your `mods` folder
             3. Launch the game — you'll see a developer warning on first run
 
-            ### What's changed since v1.0.0
-            - **Wire-shape break (heads-up for MCP clients):** every `itemId` on
-              the wire is now the canonical registry-key form (e.g.
-              `minecraft:diamond`). External tooling reading
-              `blockDetails.items[].itemId`,
-              `entityDetails.frameItem.itemId`,
-              `entityDetails.displayItem.itemId`, or
-              `entityDetails.equipment[*].itemId` will see this change. Pre-PR
-              these emitted `item.minecraft.foo` form; the texture-fetch
-              endpoints already required registry keys, so the mismatch was a
-              latent bug — converging is the fix. Same form as
-              `ItemStackDto.itemId` and `EntityPrimaryEquipmentDto.itemId`,
-              which were already canonical.
-            - **26.2-dev jar now targets `26.2-snapshot-8`** (was snapshot-7).
-              The jar gates loading at `26.2-snapshot-8` / `26.2-alpha.8` via
-              `fabric.mod.json` — snapshot-7 users need to update Minecraft.
-            - **`blockDetails.items` client-side visibility documented.**
-              Vanilla MC keeps chest / hopper / dispenser / furnace /
-              brewing-stand contents server-only, so `blockDetails.items` is
-              `[]` for those even when the container is full — use
-              `screenInspect` on the open menu instead. Lecterns, chiseled
-              bookshelves, and jukeboxes (block-entities whose items
-              participate in rendering) populate normally.
-            - **Phase 1 + Phase 2 of the multi-version plan closed.** Wire
-              format is now a single set of DTOs across every version
-              (`mod/core/protocol/dto/`), every endpoint runs through
-              `MappingResolver.unresolveClass` where needed, and 33
-              wire-contract tests pin the shape. Phase 7
-              (`AbstractDebugBridgeMod` kernel extraction) also shipped in
-              this window.
-            - Toolchain alignment: the 26.2-dev module now builds on JDK 25
-              (matches the snapshot's declared runtime); used to over-require
-              JDK 26 EA which kept it from building on a stock dev machine.
+            ### Breaking: the scripting runtime is now Apache Groovy 5
+
+            The `execute` endpoint runs **Groovy 5.0.6** (the LuaJ runtime is
+            removed). The wire contract is unchanged — `{code, timeoutMs?}` in,
+            `returnValue`/`output`/`error` out — but scripts themselves must
+            migrate:
+
+            | Lua (old) | Groovy (new) |
+            |---|---|
+            | `obj:method(args)` | `obj.method(args)` |
+            | `java.import(name)` | `java.type(name)` |
+            | `java.new(Cls, ...)` | `Cls(args)` or `Cls.create(args)` |
+            | `java.iter(x)` / `java.array(x)` | `java.list(x)` |
+            | `java.typeof(x)` | `java.typeName(x)` |
+            | `java.cast(x, name)` | removed — dispatch walks the runtime hierarchy |
+            | `io.open(...)` | `new File(...)` |
+            | `os.time()` | `System.currentTimeMillis()` |
+            | `print(x)` / `pcall` / `local x` | `println x` / `try/catch` / `def x` |
+
+            `mc` / `player` / `level` stay pre-bound, the binding persists
+            across calls, and field-vs-method is by syntax: `obj.foo` reads a
+            field (JavaBean getter fallback), `obj.foo(args)` calls a method.
+            New `sync { ... }` runs a closure on the game thread in one hop —
+            bulk loops over hundreds of entities finish in milliseconds where
+            the per-call bridge used to time out at ~100 items. Sandbox:
+            `Runtime`/`ProcessBuilder`/`java.net.*` blocked, file I/O allowed.
+            The legacy `"lua"` block in `debugbridge.json` still parses as an
+            alias for `"script"`.
+
+            ### New: session-control endpoints (off by default)
+            - `disconnect` / `joinServer` / `quit`, gated by
+              `session_control_enabled` in `debugbridge.json`; `status` reports
+              the capability as `sessionControlEnabled`.
+            - Fire-and-acknowledge: poll `snapshot` / `screenInspect` for the
+              outcome. `joinServer` pre-accepts the server resource pack so
+              automated rejoins don't stall on the prompt.
+            - Lets an MCP orchestrator drive the full rebuild → relaunch →
+              rejoin dev loop (see mcdev-mcp ≥ 2.1.0 for the client tools).
+
+            ### Fixed (caught by live in-game testing)
+            - **Overloaded methods now dispatch correctly on obfuscated
+              builds.** Each Mojang overload maps to its own runtime name;
+              resolution used to collapse them to one, making calls like
+              `vec.add(otherVec)` fail with `argument type mismatch` and
+              decimal-literal args (Groovy `BigDecimal`) unable to reach
+              `double` overloads. Constructors also select by argument types,
+              not just arity.
+            - Wrapped objects delegate `toString`/`equals`/`hashCode`, so
+              string interpolation shows real values and `==` compares values.
+            - Missing-method errors speak Mojang names with did-you-mean
+              suggestions instead of leaking `class_NNNN`.
+            - `execute` object results show Mojang field names in their
+              `fields` summary (`{x, y, z}`, not `{field_1352, ...}`).
+            - Web UI inventory panel migrated to Groovy (was still sending
+              Lua) and batches its slot/component scans in `sync { }`.
 
             ### Supported Versions
             - Minecraft 1.19 (Fabric Loader >= 0.14.0)
             - Minecraft 1.21.11 (Fabric Loader >= 0.16.0)
             - Minecraft 26.2 development snapshots (Fabric Loader >= 0.19.2;
-              the jar targets `26.2-snapshot-8` specifically)
+              the jar targets `26.2-pre-2` specifically)

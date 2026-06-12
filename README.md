@@ -129,6 +129,16 @@ mod/
 web-ui/          — Vue 3 + Pinia + Tailwind inspection app
 ```
 
+## Installation
+
+Grab the jar for your Minecraft version from the
+[GitHub releases](https://github.com/use-ai-for-mc/debugbridge/releases)
+(`debugbridge-1.19-*.jar` or `debugbridge-1.21.11-*.jar`), drop it into your
+instance's `mods/` folder, and launch with Fabric Loader. Client-side only —
+nothing to install on a server. On first run the mod shows a developer
+warning in-game and stays inactive until you accept it; the same gate writes
+`developer_mode_accepted` into `config/debugbridge.json`.
+
 ## Building
 
 Requires **JDK 21+** for the stable Fabric modules, **JDK 25** for `fabric-26.2-dev` (matches the runtime declared by the snapshot's own version manifest), and **Node ≥20.19** for the web UI.
