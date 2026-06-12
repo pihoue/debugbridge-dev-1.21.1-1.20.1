@@ -21,10 +21,13 @@ Purpose-built Java endpoints that return structured JSON in a single round-trip 
 | `screenInspect` | Current open screen/gui: type, title, container slots with item stacks (with optional `includeIcons`) |
 | `chatHistory` | Recent client-side chat messages (with optional `includeJson` for styled components) |
 | `screenshot` | Capture the framebuffer as JPEG |
+| `record_video` | Capture N framebuffer frames (every frame or at a fixed interval) as a JPEG contact-sheet grid or per-frame files |
 | `getItemTexture` / `getItemTextureById` / `getEntityItemTexture` | Render item icons as PNG (honors damage, custom model data, dyed leather, player heads) |
 | `setEntityGlow` / `setBlockGlow` / `clearBlockGlow` | Highlight entities or blocks with an in-world outline |
 | `search` | Search loaded classes by name pattern |
 | `status` | Server health and connection info |
+
+Two endpoint families are **gated off by default** in `config/debugbridge.json`: `runCommand` (`run_command_enabled`) sends commands as the player, and the session-control trio `disconnect` / `joinServer` / `quit` (`session_control_enabled`) lets an automation loop leave a world, join a server, or shut the client down. `joinServer` pre-accepts the server resource pack and defers the connect until the client has settled (no loading overlay — joining during the startup resource reload would silently drop the server pack), acking only once the connect attempt has actually started; it's safe to fire the moment the bridge port answers after a launch.
 
 ### Groovy execution (`execute` endpoint)
 
@@ -65,7 +68,8 @@ The `web-ui/` directory contains a Vue 3 + Pinia + Tailwind app for visual inspe
 
 **Bundled since v2.0.0** — the mod serves the built UI itself at
 `http://localhost:<bridge port + 100>` (default **http://localhost:9976**;
-the startup message in chat prints the exact URL). Loopback-only, static
+the join-time chat message prints the exact URL as a clickable link).
+Loopback-only, static
 assets only, and the served page connects to the bridge instance that served
 it, so side-by-side game instances each get their own UI. Disable with
 `"web_ui_enabled": false` in `config/debugbridge.json`.
@@ -103,8 +107,8 @@ The web UI connects directly to the WebSocket server — no MCP layer required.
                 ^
                 | WebSocket (same port)
 +---------------+-------------------+
-|  Vue Web UI (localhost:5173)      |
-|  Dashboard, Inspector, Console    |
+|  Vue Web UI (bundled, :9976;      |
+|  npm dev server :5173)            |
 +-----------------------------------+
 ```
 
@@ -213,7 +217,8 @@ The shape comparator tolerates value differences (transient game state) but flag
 
 Install [mcdev-mcp](https://github.com/use-ai-for-mc/mcdev-mcp) and configure it in your MCP client. The MCP server auto-connects to DebugBridge (scans ports 9876–9886). Tools include:
 
-- **Runtime** (requires this mod): `mc_execute`, `mc_snapshot`, `mc_nearby_entities`, `mc_entity_details`, `mc_looked_at_entity`, `mc_nearby_blocks`, `mc_block_details`, `mc_screen_inspect`, `mc_chat_history`, `mc_screenshot`, `mc_get_item_texture`, `mc_set_entity_glow`, `mc_set_block_glow`, `mc_clear_block_glow`
+- **Runtime** (requires this mod): `mc_execute`, `mc_snapshot`, `mc_nearby_entities`, `mc_entity_details`, `mc_looked_at_entity`, `mc_nearby_blocks`, `mc_block_details`, `mc_screen_inspect`, `mc_chat_history`, `mc_screenshot`, `mc_record_video`, `mc_get_item_texture`, `mc_set_entity_glow`, `mc_set_block_glow`, `mc_clear_block_glow`
+- **Session control / dev loop** (requires `session_control_enabled`): `mc_join_server`, `mc_leave_server`, `mc_quit_client`, plus `mc_wait_for_bridge` / `mc_wait_until_in_world` for driving rebuild → relaunch → rejoin loops
 - **Static** (works offline): `mc_get_class`, `mc_get_method`, `mc_search`, `mc_find_refs`, `mc_find_hierarchy`
 
 ### Direct WebSocket
@@ -225,7 +230,7 @@ Connect to `ws://127.0.0.1:9876` and send JSON:
   "id": "1",
   "type": "execute",
   "payload": {
-    "code": "return player:blockPosition():toShortString()"
+    "code": "return player.blockPosition().toShortString()"
   }
 }
 ```
@@ -234,7 +239,7 @@ Each request gets a matching `{id, type, payload}` response.
 
 ## Dependencies Bundled in JAR
 
-- **Apache Groovy 4.0.24** — JVM scripting runtime (Apache-2.0)
+- **Apache Groovy 5.0.6** — JVM scripting runtime (Apache-2.0)
 - **Java-WebSocket 1.6.0** — WebSocket server (MIT)
 - **Gson 2.14.0** — JSON parsing (Apache 2.0)
 

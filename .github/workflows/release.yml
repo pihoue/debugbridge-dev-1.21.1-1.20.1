@@ -165,7 +165,16 @@ jobs:
             instance serves its own UI and the page connects back to the
             instance that served it. Disable with `"web_ui_enabled": false`
             in `config/debugbridge.json`. The `status` endpoint reports the
-            port as `webUiPort`.
+            port as `webUiPort`, and the join-time chat message prints the
+            URL as a clickable link.
+
+            ### New: record_video endpoint
+            Captures N frames of the main framebuffer (every frame or at a
+            fixed interval) and writes a single JPEG contact-sheet grid or
+            per-frame JPEGs under `<gameDir>/debugbridge-recordings/` —
+            enough to check an animation or camera path without a screen
+            recorder. Concurrent recordings (and screenshots taken
+            mid-recording) return `BUSY`.
 
             ### Breaking: the scripting runtime is now Apache Groovy 5
 
@@ -200,9 +209,14 @@ jobs:
             - `disconnect` / `joinServer` / `quit`, gated by
               `session_control_enabled` in `debugbridge.json`; `status` reports
               the capability as `sessionControlEnabled`.
-            - Fire-and-acknowledge: poll `snapshot` / `screenInspect` for the
-              outcome. `joinServer` pre-accepts the server resource pack so
-              automated rejoins don't stall on the prompt.
+            - `disconnect`/`quit` are fire-and-acknowledge: poll `snapshot` /
+              `screenInspect` for the outcome. `joinServer` pre-accepts the
+              server resource pack and defers the connect until the client
+              has settled (no loading overlay) — joining during the startup
+              resource reload would silently drop the server pack — so its
+              ack means the connect attempt actually started (bounded at
+              60 s; a never-settling client gets an error response). Safe to
+              fire the moment the bridge port answers after a launch.
             - Lets an MCP orchestrator drive the full rebuild → relaunch →
               rejoin dev loop (see mcdev-mcp ≥ 2.1.0 for the client tools).
 
