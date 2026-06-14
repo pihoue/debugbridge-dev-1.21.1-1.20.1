@@ -1,0 +1,244 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-legacy-mods:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify tag matches the Gradle version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          GRADLE=$(sed -n 's/.*version = "\([^"]*\)".*/\1/p' mod/build.gradle.kts | head -1)
+          if [ "$TAG" != "$GRADLE" ]; then
+            echo "::error::Tag v$TAG does not match Gradle version $GRADLE in mod/build.gradle.kts"
+            exit 1
+          fi
+          echo "Tag v$TAG matches Gradle version"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Set up Node (web UI is bundled into core resources)
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Fabric 1.19 and 1.21.11 mods
+        working-directory: mod
+        run: ./gradlew :fabric-1.19:build :fabric-1.21.11:build --no-daemon
+
+      - name: Verify the web UI is bundled in the jars
+        working-directory: mod
+        run: |
+          for jar in fabric-1.19/build/libs/debugbridge-1.19-*[0-9].jar \
+                     fabric-1.21.11/build/libs/debugbridge-1.21.11-*[0-9].jar; do
+            unzip -p "$jar" 'META-INF/jars/core-*.jar' > /tmp/core-nested.jar
+            unzip -l /tmp/core-nested.jar | grep -q 'webui/index.html' \
+              || { echo "::error::$jar is missing the bundled web UI"; exit 1; }
+            echo "$jar: web UI bundled"
+          done
+
+      - name: Upload 1.19 release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-fabric-1.19
+          path: mod/fabric-1.19/build/libs/*.jar
+          if-no-files-found: error
+
+      - name: Upload 1.21.11 release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-fabric-1.21.11
+          path: mod/fabric-1.21.11/build/libs/*.jar
+          if-no-files-found: error
+
+  build-26-2-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+
+      - name: Set up Node (web UI is bundled into core resources)
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Fabric 26.2 dev mod
+        working-directory: mod
+        run: ./gradlew :fabric-26.2-dev:build --no-daemon
+
+      - name: Verify the web UI is bundled in the jar
+        working-directory: mod
+        run: |
+          for jar in fabric-26.2-dev/build/libs/debugbridge-26.2-dev-*[0-9].jar; do
+            unzip -p "$jar" 'META-INF/jars/core-*.jar' > /tmp/core-nested.jar
+            unzip -l /tmp/core-nested.jar | grep -q 'webui/index.html' \
+              || { echo "::error::$jar is missing the bundled web UI"; exit 1; }
+            echo "$jar: web UI bundled"
+          done
+
+      - name: Upload 26.2 release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-fabric-26.2-dev
+          path: mod/fabric-26.2-dev/build/libs/*.jar
+          if-no-files-found: error
+
+  build-and-release:
+    needs:
+      - build-legacy-mods
+      - build-26-2-dev
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Download 1.19 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: release-fabric-1.19
+          path: release-artifacts/fabric-1.19
+
+      - name: Download 1.21.11 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: release-fabric-1.21.11
+          path: release-artifacts/fabric-1.21.11
+
+      - name: Download 26.2 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: release-fabric-26.2-dev
+          path: release-artifacts/fabric-26.2-dev
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: DebugBridge v${{ steps.version.outputs.VERSION }}
+          draft: false
+          prerelease: false
+          files: |
+            release-artifacts/fabric-1.19/*.jar
+            release-artifacts/fabric-1.21.11/*.jar
+            release-artifacts/fabric-26.2-dev/*.jar
+          body: |
+            ## DebugBridge v${{ steps.version.outputs.VERSION }}
+
+            Groovy-Java bridge for Minecraft: a WebSocket REPL into the running client.
+
+            ### Installation
+            1. Install Fabric Loader for your Minecraft version
+            2. Drop the appropriate JAR into your `mods` folder
+            3. Launch the game — you'll see a developer warning on first run
+            4. After accepting, the bundled web UI is at http://localhost:9976
+               (the in-game startup message prints the exact URL)
+
+            ### New: bundled web UI
+            The Vue inspection app (dashboard, entity/block browsers, screen
+            inspector, object browser, Groovy console) now ships inside the
+            jar and is served at `http://localhost:<bridge port + 100>` —
+            no repo checkout or Node toolchain needed. Loopback-only and
+            static-assets-only, same posture as the bridge itself; each game
+            instance serves its own UI and the page connects back to the
+            instance that served it. Disable with `"web_ui_enabled": false`
+            in `config/debugbridge.json`. The `status` endpoint reports the
+            port as `webUiPort`, and the join-time chat message prints the
+            URL as a clickable link.
+
+            ### New: record_video endpoint
+            Captures N frames of the main framebuffer (every frame or at a
+            fixed interval) and writes a single JPEG contact-sheet grid or
+            per-frame JPEGs under `<gameDir>/debugbridge-recordings/` —
+            enough to check an animation or camera path without a screen
+            recorder. Concurrent recordings (and screenshots taken
+            mid-recording) return `BUSY`.
+
+            ### Breaking: the scripting runtime is now Apache Groovy 5
+
+            The `execute` endpoint runs **Groovy 5.0.6** (the LuaJ runtime is
+            removed). The wire contract is unchanged — `{code, timeoutMs?}` in,
+            `returnValue`/`output`/`error` out — but scripts themselves must
+            migrate:
+
+            | Lua (old) | Groovy (new) |
+            |---|---|
+            | `obj:method(args)` | `obj.method(args)` |
+            | `java.import(name)` | `java.type(name)` |
+            | `java.new(Cls, ...)` | `Cls(args)` or `Cls.create(args)` |
+            | `java.iter(x)` / `java.array(x)` | `java.list(x)` |
+            | `java.typeof(x)` | `java.typeName(x)` |
+            | `java.cast(x, name)` | removed — dispatch walks the runtime hierarchy |
+            | `io.open(...)` | `new File(...)` |
+            | `os.time()` | `System.currentTimeMillis()` |
+            | `print(x)` / `pcall` / `local x` | `println x` / `try/catch` / `def x` |
+
+            `mc` / `player` / `level` stay pre-bound, the binding persists
+            across calls, and field-vs-method is by syntax: `obj.foo` reads a
+            field (JavaBean getter fallback), `obj.foo(args)` calls a method.
+            New `sync { ... }` runs a closure on the game thread in one hop —
+            bulk loops over hundreds of entities finish in milliseconds where
+            the per-call bridge used to time out at ~100 items. Sandbox:
+            `Runtime`/`ProcessBuilder`/`java.net.*` blocked, file I/O allowed.
+            The legacy `"lua"` block in `debugbridge.json` still parses as an
+            alias for `"script"`.
+
+            ### New: session-control endpoints (off by default)
+            - `disconnect` / `joinServer` / `quit`, gated by
+              `session_control_enabled` in `debugbridge.json`; `status` reports
+              the capability as `sessionControlEnabled`.
+            - `disconnect`/`quit` are fire-and-acknowledge: poll `snapshot` /
+              `screenInspect` for the outcome. `joinServer` pre-accepts the
+              server resource pack and defers the connect until the client
+              has settled (no loading overlay) — joining during the startup
+              resource reload would silently drop the server pack — so its
+              ack means the connect attempt actually started (bounded at
+              60 s; a never-settling client gets an error response). Safe to
+              fire the moment the bridge port answers after a launch.
+            - Lets an MCP orchestrator drive the full rebuild → relaunch →
+              rejoin dev loop (see mcdev-mcp ≥ 2.1.0 for the client tools).
+
+            ### Fixed (caught by live in-game testing)
+            - **Overloaded methods now dispatch correctly on obfuscated
+              builds.** Each Mojang overload maps to its own runtime name;
+              resolution used to collapse them to one, making calls like
+              `vec.add(otherVec)` fail with `argument type mismatch` and
+              decimal-literal args (Groovy `BigDecimal`) unable to reach
+              `double` overloads. Constructors also select by argument types,
+              not just arity.
+            - Wrapped objects delegate `toString`/`equals`/`hashCode`, so
+              string interpolation shows real values and `==` compares values.
+            - Missing-method errors speak Mojang names with did-you-mean
+              suggestions instead of leaking `class_NNNN`.
+            - `execute` object results show Mojang field names in their
+              `fields` summary (`{x, y, z}`, not `{field_1352, ...}`).
+            - Web UI inventory panel migrated to Groovy (was still sending
+              Lua) and batches its slot/component scans in `sync { }`.
+
+            ### Supported Versions
+            - Minecraft 1.19 (Fabric Loader >= 0.14.0)
+            - Minecraft 1.21.11 (Fabric Loader >= 0.16.0)
+            - Minecraft 26.2 development snapshots (Fabric Loader >= 0.19.2;
+              the jar targets `26.2-pre-2` specifically)

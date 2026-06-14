@@ -6,9 +6,6 @@ import com.debugbridge.core.chat.ChatHistoryProvider;
 import com.debugbridge.core.entity.ClientEntityGlowManager;
 import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
-import com.debugbridge.core.lua.DirectDispatcher;
-import com.debugbridge.core.lua.LuaRuntime;
-import com.debugbridge.core.lua.ThreadDispatcher;
 import com.debugbridge.core.mapping.MappingResolver;
 import com.debugbridge.core.protocol.BridgeRequest;
 import com.debugbridge.core.protocol.BridgeResponse;
@@ -23,7 +20,6 @@ import com.debugbridge.core.protocol.dto.NearbyBlocksDto;
 import com.debugbridge.core.protocol.dto.NearbyEntitiesDto;
 import com.debugbridge.core.protocol.dto.ScreenInspectDto;
 import com.debugbridge.core.protocol.dto.SearchResultDto;
-import com.debugbridge.core.protocol.dto.ItemListDto;
 import com.debugbridge.core.protocol.dto.SlotDto;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.protocol.dto.StatusDto;
@@ -32,257 +28,152 @@ import com.debugbridge.core.recording.RecordingProvider;
 import com.debugbridge.core.recording.RecordingRequest;
 import com.debugbridge.core.recording.RecordingResult;
 import com.debugbridge.core.refs.ObjectRefStore;
-import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
+import com.debugbridge.core.script.ScriptRuntime;
+import com.debugbridge.core.script.ThreadDispatcher;
+import com.debugbridge.core.session.SessionControlProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
 import com.google.gson.*;
+import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import org.java_websocket.WebSocket;
+import org.java_websocket.handshake.ClientHandshake;
+import org.java_websocket.server.WebSocketServer;
 
 /**
- * WebSocket server that accepts Lua script execution requests and other commands.
+ * WebSocket server that accepts Groovy script execution requests and other commands.
  * Runs inside the Minecraft JVM. Accepts one client (the MCP server) at a time.
  */
-public class BridgeServer {
+public class BridgeServer extends WebSocketServer {
     private static final Logger LOG = Logger.getLogger("DebugBridge");
-    /** Default serializer: nulls become {@code "field": null} on the wire. */
+    /** Default serializer: nulls become {@code "field": null} on the wire.
+     * Used for endpoints whose schema treats null as a meaningful value
+     * (e.g. {@code lookedAtEntity.entityId}). */
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
-    /** Omit-nulls serializer: null fields disappear from the JSON entirely. */
+    /** Omit-nulls serializer: null fields disappear from the JSON entirely.
+     * Used for endpoints with conditional fields (e.g. {@code status} only
+     * emits {@code gameDir}/{@code logsDir}/etc. when the host mod has set a
+     * game directory). */
     private static final Gson GSON_OMIT_NULLS = new Gson();
 
-    /** Lazily-created WebSocket server handle. Loaded on first start() call,
-     *  so the Java-WebSocket library only needs to be on the classpath at
-     *  that point (not when BridgeServer itself is loaded). */
-    private volatile ServerHandle handle;
-
-    private final int port;
-    private volatile LuaRuntime lua;
+    private final ScriptRuntime script;
     private final MappingResolver resolver;
-    private final com.debugbridge.core.lua.ThreadDispatcher dispatcher;
     private final ObjectRefStore refs;
-    private volatile ResultSerializer serializer;
+    private final ResultSerializer serializer;
     private final GameStateProvider stateProvider;
     private final ScreenshotProvider screenshotProvider;
+    /**
+     * Absolute path to the game run directory (the .minecraft / profile root),
+     * or {@code null} if the embedder didn't provide one. When non-null, the
+     * status endpoint exposes {@code gameDir} / {@code latestLog} / {@code debugLog}
+     * so a connecting MCP client can read logs via its own file-read tools.
+     */
     private volatile Path gameDir;
+
+    /**
+     * Item texture resolver. Set by the version-specific module.
+     */
     private volatile ItemTextureProvider textureProvider;
+
+    /**
+     * Nearby entities query provider. Set by the version-specific module.
+     */
     private volatile NearbyEntitiesProvider entitiesProvider;
+
+    /**
+     * Nearby block-entities query provider. Set by the version-specific module.
+     */
     private volatile NearbyBlocksProvider blocksProvider;
+
+    /**
+     * Raycast-based "what is the player aiming at" provider. Set by the
+     * version-specific module.
+     */
     private volatile LookedAtEntityProvider lookedAtEntityProvider;
+
+    /**
+     * Recent client-side chat messages. Set by the version-specific module.
+     */
     private volatile ChatHistoryProvider chatHistoryProvider;
+
+    /**
+     * Currently-open screen / container introspection. Set by the
+     * version-specific module.
+     */
     private volatile ScreenInspectProvider screenInspectProvider;
+
+    /**
+     * Multi-frame framebuffer capture provider. Set by the version-specific
+     * module. Null disables the {@code record_video} endpoint (older test
+     * harnesses don't wire it).
+     */
     private volatile RecordingProvider recordingProvider;
-    private volatile ItemRegistryProvider itemRegistryProvider;
+
+    /**
+     * Callback for bind errors (e.g., port already in use). Called from the
+     * WebSocket selector thread when the server fails to bind.
+     */
     private volatile Consumer<Exception> bindErrorCallback;
-    private volatile Runnable startCallback;
-    private boolean reuseAddr = false;
+
+    /**
+     * Whether slash-command execution via the bridge is honored. When false
+     * runCommand requests behave as if they don't exist.
+     */
     private volatile boolean runCommandEnabled = false;
 
-    private final ExecutorService handlerExecutor = Executors.newSingleThreadExecutor(r -> {
-        Thread t = new Thread(r, "bridge-handler");
-        t.setDaemon(true);
-        return t;
-    });
+    /**
+     * Session control (disconnect / joinServer / quit). Set by the
+     * version-specific module; only honored when {@link #sessionControlEnabled}.
+     */
+    private volatile SessionControlProvider sessionControlProvider;
 
-    private final ConcurrentHashMap<String, Future<?>> pendingExecutions = new ConcurrentHashMap<>();
+    /**
+     * Whether session-control endpoints are honored. Off by default — they can
+     * tear down the user's play session, so automation setups opt in via config.
+     */
+    private volatile boolean sessionControlEnabled = false;
 
-    public BridgeServer(
-            int port,
-            MappingResolver resolver,
-            com.debugbridge.core.lua.ThreadDispatcher dispatcher) {
+    /** Loopback port of the bundled web UI; null when the UI isn't running. */
+    private volatile Integer webUiPort = null;
+
+    public BridgeServer(int port, MappingResolver resolver, ThreadDispatcher dispatcher) {
         this(port, resolver, dispatcher, null, null);
     }
 
     public BridgeServer(
-            int port,
-            MappingResolver resolver,
-            com.debugbridge.core.lua.ThreadDispatcher dispatcher,
-            GameStateProvider stateProvider) {
+            int port, MappingResolver resolver, ThreadDispatcher dispatcher, GameStateProvider stateProvider) {
         this(port, resolver, dispatcher, stateProvider, null);
     }
 
     public BridgeServer(
             int port,
             MappingResolver resolver,
-            com.debugbridge.core.lua.ThreadDispatcher dispatcher,
+            ThreadDispatcher dispatcher,
             GameStateProvider stateProvider,
             ScreenshotProvider screenshotProvider) {
-        this.port = port;
+        super(new InetSocketAddress("127.0.0.1", port));
         this.resolver = resolver;
-        this.dispatcher = dispatcher;
         this.refs = new ObjectRefStore();
+        this.script = new ScriptRuntime(resolver, dispatcher, refs);
+        this.serializer = new ResultSerializer(resolver, refs, script.getBridge());
         this.stateProvider = stateProvider;
         this.screenshotProvider = screenshotProvider;
-        // LuaRuntime and ResultSerializer created lazily on first execute()
+        setReuseAddr(true);
     }
 
-    public synchronized void setReuseAddr(boolean reuse) {
-        this.reuseAddr = reuse;
-        var h = handle;
-        if (h != null) h.setReuseAddr(reuse);
-    }
-
-    /** Set a callback invoked when the WebSocket server has bound and started. */
-    public void setStartCallback(Runnable callback) {
-        this.startCallback = callback;
-    }
-
-    /** Start the underlying WebSocket server. Thread-safe; actual binding
-     *  happens asynchronously in the WebSocket selector thread. */
-    public synchronized void start() {
-        if (handle != null) return;
-        handle = new ServerHandle(port, reuseAddr);
-        handle.start();
-    }
-
-    /** Gracefully stop the server. No-op if not running. */
-    public synchronized void stop(int timeout) throws InterruptedException {
-        if (handle == null) return;
-        handle.stop(timeout);
-    }
-
-    /** Port this server was configured for. */
-    public int getPort() { return port; }
-
-    // -- Inner WebSocket server (lazily loaded) --
-
-    /** Extends WebSocketServer so that Java-WebSocket is only loaded when
-     *  this inner class is first referenced (i.e. on start()). */
-    private final class ServerHandle extends org.java_websocket.server.WebSocketServer {
-        ServerHandle(int port, boolean reuseAddr) {
-            super(new InetSocketAddress("127.0.0.1", port));
-            setReuseAddr(reuseAddr);
-            setConnectionLostTimeout(30);
-        }
-
-        @Override
-        public void onOpen(org.java_websocket.WebSocket conn, org.java_websocket.handshake.ClientHandshake handshake) {
-            BridgeServer.this.onOpen(conn, handshake);
-        }
-
-        @Override
-        public void onClose(org.java_websocket.WebSocket conn, int code, String reason, boolean remote) {
-            BridgeServer.this.onClose(conn, code, reason, remote);
-        }
-
-        @Override
-        public void onMessage(org.java_websocket.WebSocket conn, String message) {
-            BridgeServer.this.onMessage(conn, message);
-        }
-
-        @Override
-        public void onError(org.java_websocket.WebSocket conn, Exception ex) {
-            BridgeServer.this.onError(conn, ex);
-        }
-
-        @Override
-        public void onStart() {
-            BridgeServer.this.onStart();
-        }
-    }
-
-    private void onOpen(org.java_websocket.WebSocket conn, org.java_websocket.handshake.ClientHandshake handshake) {
-        LOG.info("[DebugBridge] Client connected: " + conn.getRemoteSocketAddress());
-    }
-
-    private void onClose(org.java_websocket.WebSocket conn, int code, String reason, boolean remote) {
-        LOG.info("[DebugBridge] Client disconnected: " + reason);
-        for (Future<?> f : pendingExecutions.values()) {
-            f.cancel(true);
-        }
-        pendingExecutions.clear();
-        refs.clear();
-        handlerExecutor.submit(() -> {
-            ClientEntityGlowManager.clear();
-            ClientBlockGlowManager.clear();
-        });
-    }
-
-    private void onMessage(org.java_websocket.WebSocket conn, String message) {
-        BridgeRequest req;
-        try {
-            req = GSON.fromJson(message, BridgeRequest.class);
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "[DebugBridge] Failed to parse message", e);
-            try {
-                BridgeResponse resp = BridgeResponse.error("unknown", "Invalid JSON: " + e.getMessage());
-                conn.send(GSON.toJson(resp.toJson()));
-            } catch (Exception ignored) {
-            }
-            return;
-        }
-        if (req.id == null || req.id.isEmpty()) {
-            req.id = "req-" + System.nanoTime();
-        }
-        dispatchAsync(req, conn);
-    }
-
-    private void dispatchAsync(BridgeRequest req, org.java_websocket.WebSocket conn) {
-        final String fId = req.id;
-        Future<?> future = handlerExecutor.submit(() -> {
-            try {
-                BridgeResponse resp = handleRequest(req);
-                conn.send(GSON.toJson(resp.toJson()));
-            } catch (Exception e) {
-                try {
-                    BridgeResponse resp = BridgeResponse.error(fId, "Internal error: " + e.getMessage());
-                    conn.send(GSON.toJson(resp.toJson()));
-                } catch (Exception ignored) {
-                }
-            } finally {
-                pendingExecutions.remove(fId);
-            }
-        });
-        pendingExecutions.put(req.id, future);
-    }
-
-    private void onError(org.java_websocket.WebSocket conn, Exception ex) {
-        LOG.log(Level.WARNING, "[DebugBridge] WebSocket error", ex);
-        if (conn == null
-                && (ex instanceof java.net.BindException
-                    || (ex.getCause() != null && ex.getCause() instanceof java.net.BindException))) {
-            Consumer<Exception> callback = this.bindErrorCallback;
-            if (callback != null) {
-                callback.accept(ex);
-            }
-        }
-    }
-
-    private void onStart() {
-        LOG.info("[DebugBridge] Server started on port " + getPort());
-        Runnable cb = this.startCallback;
-        if (cb != null) cb.run();
-    }
-
-    public LuaRuntime getLuaRuntime() {
-        if (lua == null) {
-            synchronized (this) {
-                if (lua == null) {
-                    var d = dispatcher;
-                    lua = new LuaRuntime(resolver, d != null ? d : new DirectDispatcher(), refs);
-                    serializer = new ResultSerializer(resolver, refs);
-                }
-            }
-        }
-        return lua;
-    }
-
-    public ResultSerializer getSerializer() {
-        getLuaRuntime(); // ensure serializer is initialized
-        return serializer;
+    public ScriptRuntime getScriptRuntime() {
+        return script;
     }
 
     /**
@@ -296,6 +187,21 @@ public class BridgeServer {
 
     public void setRunCommandEnabled(boolean enabled) {
         this.runCommandEnabled = enabled;
+    }
+
+    public void setSessionControlEnabled(boolean enabled) {
+        this.sessionControlEnabled = enabled;
+    }
+
+    /** Loopback port of the bundled web UI, surfaced in {@code status}; null when not running. */
+    public void setWebUiPort(Integer port) {
+        this.webUiPort = port;
+    }
+
+    public void setSessionControlProvider(SessionControlProvider provider) {
+        this.sessionControlProvider = provider;
+        LOG.info("[DebugBridge] Session control provider registered: "
+                + provider.getClass().getSimpleName());
     }
 
     public void setChatHistoryProvider(ChatHistoryProvider provider) {
@@ -313,12 +219,6 @@ public class BridgeServer {
     public void setRecordingProvider(RecordingProvider provider) {
         this.recordingProvider = provider;
         LOG.info("[DebugBridge] Recording provider registered");
-    }
-
-    public void setItemRegistryProvider(ItemRegistryProvider provider) {
-        this.itemRegistryProvider = provider;
-        LOG.info("[DebugBridge] Item registry provider registered: "
-                + provider.getClass().getSimpleName());
     }
 
     /** Exposed so the per-version mod can route render-tick callbacks through. */
@@ -374,6 +274,57 @@ public class BridgeServer {
         this.bindErrorCallback = callback;
     }
 
+    @Override
+    public void onOpen(WebSocket conn, ClientHandshake handshake) {
+        LOG.info("[DebugBridge] Client connected: " + conn.getRemoteSocketAddress());
+    }
+
+    @Override
+    public void onClose(WebSocket conn, int code, String reason, boolean remote) {
+        LOG.info("[DebugBridge] Client disconnected: " + reason);
+        refs.clear();
+        // Highlights are transient debug state tied to a live session. Wipe them
+        // so an abrupt disconnect (tab close, killed MCP server, network drop)
+        // can't leave glow orphaned in-world until the client restarts.
+        ClientEntityGlowManager.clear();
+        ClientBlockGlowManager.clear();
+    }
+
+    @Override
+    public void onMessage(WebSocket conn, String message) {
+        try {
+            BridgeRequest req = GSON.fromJson(message, BridgeRequest.class);
+            BridgeResponse resp = handleRequest(req);
+            conn.send(GSON.toJson(resp.toJson()));
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "[DebugBridge] Error handling message", e);
+            try {
+                BridgeResponse resp = BridgeResponse.error("unknown", "Internal error: " + e.getMessage());
+                conn.send(GSON.toJson(resp.toJson()));
+            } catch (Exception e2) {
+                // Connection may be dead
+            }
+        }
+    }
+
+    @Override
+    public void onError(WebSocket conn, Exception ex) {
+        LOG.log(Level.WARNING, "[DebugBridge] WebSocket error", ex);
+        // conn == null means this is a server-level error (e.g., bind failure)
+        if (conn == null
+                && (ex instanceof BindException || (ex.getCause() != null && ex.getCause() instanceof BindException))) {
+            Consumer<Exception> callback = this.bindErrorCallback;
+            if (callback != null) {
+                callback.accept(ex);
+            }
+        }
+    }
+
+    @Override
+    public void onStart() {
+        LOG.info("[DebugBridge] Server started on port " + getPort());
+    }
+
     private BridgeResponse handleRequest(BridgeRequest req) {
         try {
             return switch (req.type) {
@@ -395,12 +346,14 @@ public class BridgeServer {
                 case "nearbyBlocks" -> handleNearbyBlocks(req);
                 case "blockDetails" -> handleBlockDetails(req);
                 case "lookedAtEntity" -> handleLookedAtEntity(req);
-                case "listItems" -> handleListItems(req);
                 case "chatHistory" -> handleChatHistory(req);
                 case "screenInspect" -> handleScreenInspect(req);
                 case "setEntityGlow" -> handleSetEntityGlow(req);
                 case "setBlockGlow" -> handleSetBlockGlow(req);
                 case "clearBlockGlow" -> handleClearBlockGlow(req);
+                case "disconnect" -> handleDisconnect(req);
+                case "joinServer" -> handleJoinServer(req);
+                case "quit" -> handleQuit(req);
                 default -> BridgeResponse.error(req.id, "Unknown request type: " + req.type);
             };
         } catch (Exception e) {
@@ -408,7 +361,7 @@ public class BridgeServer {
         }
     }
 
-    // Hard ceiling on per-request Lua timeouts. Even if a caller asks for
+    // Hard ceiling on per-request script timeouts. Even if a caller asks for
     // more, we cap here so a runaway script can't hang the bridge forever.
     private static final long MAX_EXECUTE_TIMEOUT_MS = 300_000L;
 
@@ -424,8 +377,7 @@ public class BridgeServer {
             timeoutMs = Math.min(MAX_EXECUTE_TIMEOUT_MS, Math.max(0, requested));
         }
 
-        LuaRuntime rt = getLuaRuntime();
-        LuaRuntime.ExecutionResult result = rt.execute(code, timeoutMs);
+        ScriptRuntime.ExecutionResult result = script.execute(code, timeoutMs);
 
         if (!result.isSuccess()) {
             return BridgeResponse.error(req.id, result.error);
@@ -773,11 +725,11 @@ public class BridgeServer {
 
     private BridgeResponse handleSnapshot(BridgeRequest req) {
         if (stateProvider == null) {
-            return BridgeResponse.error(req.id, "No game state provider configured. Use mc_execute with Lua instead.");
+            return BridgeResponse.error(
+                    req.id, "No game state provider configured. Use mc_execute with Groovy instead.");
         }
         try {
-            SnapshotDto snapshot = dispatcher.executeOnGameThread(
-                    () -> stateProvider.captureSnapshot(), 5000);
+            SnapshotDto snapshot = stateProvider.captureSnapshot();
             // Class-name mapping on the two nested entity-type fields.
             if (snapshot.player != null && snapshot.player.vehicle != null) {
                 snapshot.player.vehicle.type = unresolveOrNull(snapshot.player.vehicle.type);
@@ -836,25 +788,100 @@ public class BridgeServer {
         if (command.length() > MAX_COMMAND_LEN) {
             return BridgeResponse.error(req.id, "runCommand: command too long (max " + MAX_COMMAND_LEN + " chars)");
         }
-        // SECURITY: encode the command as `string.char(b1, b2, ...)` so the
-        // generated Lua source contains no user-controlled bytes. Earlier
-        // single-quote escaping ('"' -> "\\'") was bypassable via backslash +
-        // quote, newlines, and null bytes. This formulation is unconditionally
+        // SECURITY: encode the command as a `new String(byte[], "UTF-8")` built
+        // from numeric literals, so the generated Groovy source contains no
+        // user-controlled bytes. This formulation is unconditionally
         // injection-proof: every byte of the user's command lands as a numeric
-        // literal, and Lua reassembles the string at runtime.
+        // literal, and Groovy reassembles the string at runtime.
         // This is a temporary measure — the long-term fix is a native
-        // CommandProvider that bypasses Lua entirely (see review queue).
+        // CommandProvider that bypasses the script runtime entirely (see review queue).
         byte[] cmdBytes = command.getBytes(StandardCharsets.UTF_8);
         StringBuilder bytes = new StringBuilder(cmdBytes.length * 4);
         for (int i = 0; i < cmdBytes.length; i++) {
             if (i > 0) bytes.append(',');
             bytes.append(cmdBytes[i] & 0xFF);
         }
-        String luaCode = "local cmd = string.char(" + bytes + ")\n"
-                + "local mc = java.import('net.minecraft.client.Minecraft'):getInstance()\n"
-                + "mc.player:connection():sendCommand(cmd)\n"
-                + "return 'Command sent: ' .. cmd";
-        return handleExecute(new BridgeRequest(req.id, "execute", createPayload("code", luaCode)));
+        String groovyCode = "def cmd = new String([" + bytes + "] as byte[], 'UTF-8')\n"
+                + "mc.player.connection().sendCommand(cmd)\n"
+                + "return 'Command sent: ' + cmd";
+        return handleExecute(new BridgeRequest(req.id, "execute", createPayload("code", groovyCode)));
+    }
+
+    // ==================== Session Control Handlers ====================
+
+    /** Hard cap on `joinServer` address length. */
+    private static final int MAX_ADDRESS_LEN = 256;
+
+    /**
+     * Common gate for session-control endpoints. Returns an error response when
+     * the feature is disabled or unavailable, or null when the request may
+     * proceed. Unlike runCommand these report an explicit "disabled" error —
+     * automation needs an actionable message, not a missing endpoint.
+     */
+    private BridgeResponse sessionControlGate(BridgeRequest req) {
+        if (!sessionControlEnabled) {
+            return BridgeResponse.error(
+                    req.id,
+                    "Session control is disabled. Set session_control_enabled=true in debugbridge.json and restart.");
+        }
+        if (sessionControlProvider == null) {
+            return BridgeResponse.error(req.id, "No session control provider configured for this Minecraft version.");
+        }
+        return null;
+    }
+
+    private BridgeResponse handleDisconnect(BridgeRequest req) {
+        BridgeResponse gate = sessionControlGate(req);
+        if (gate != null) return gate;
+        try {
+            sessionControlProvider.disconnect();
+            JsonObject result = new JsonObject();
+            result.addProperty("status", "disconnecting");
+            return BridgeResponse.success(req.id, result, null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "disconnect failed: " + e.getMessage());
+        }
+    }
+
+    private BridgeResponse handleJoinServer(BridgeRequest req) {
+        BridgeResponse gate = sessionControlGate(req);
+        if (gate != null) return gate;
+        if (req.payload == null
+                || !req.payload.has("address")
+                || !req.payload.get("address").isJsonPrimitive()) {
+            return BridgeResponse.error(req.id, "joinServer: 'address' must be a string");
+        }
+        String address = req.payload.get("address").getAsString().trim();
+        if (address.isEmpty() || address.length() > MAX_ADDRESS_LEN) {
+            return BridgeResponse.error(req.id, "joinServer: 'address' must be 1-" + MAX_ADDRESS_LEN + " chars");
+        }
+        boolean acceptResourcePacks = true;
+        if (req.payload.has("acceptResourcePacks")
+                && req.payload.get("acceptResourcePacks").isJsonPrimitive()) {
+            acceptResourcePacks = req.payload.get("acceptResourcePacks").getAsBoolean();
+        }
+        try {
+            sessionControlProvider.joinServer(address, acceptResourcePacks);
+            JsonObject result = new JsonObject();
+            result.addProperty("status", "connecting");
+            result.addProperty("address", address);
+            return BridgeResponse.success(req.id, result, null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "joinServer failed: " + e.getMessage());
+        }
+    }
+
+    private BridgeResponse handleQuit(BridgeRequest req) {
+        BridgeResponse gate = sessionControlGate(req);
+        if (gate != null) return gate;
+        try {
+            sessionControlProvider.quit();
+            JsonObject result = new JsonObject();
+            result.addProperty("status", "quitting");
+            return BridgeResponse.success(req.id, result, null);
+        } catch (Exception e) {
+            return BridgeResponse.error(req.id, "quit failed: " + e.getMessage());
+        }
     }
 
     /** Hard cap on `runCommand` input length. */
@@ -866,6 +893,8 @@ public class BridgeServer {
         dto.mappingStatus = resolver.isObfuscated() ? "mojang" : "passthrough";
         dto.obfuscated = resolver.isObfuscated();
         dto.refs = refs.size();
+        dto.sessionControlEnabled = sessionControlEnabled && sessionControlProvider != null;
+        dto.webUiPort = webUiPort;
 
         // Expose the game dir and log paths so a connecting client can read the
         // log via its own file-read tools. We always expose the path we *would*
@@ -1139,29 +1168,6 @@ public class BridgeServer {
         } catch (Exception e) {
             return BridgeResponse.error(
                     req.id, "Screen inspect failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-    }
-
-    private BridgeResponse handleListItems(BridgeRequest req) {
-        if (itemRegistryProvider == null) {
-            return BridgeResponse.error(req.id, "No item registry provider configured for this Minecraft version.");
-        }
-        String filter = (req.payload != null && req.payload.has("filter"))
-                ? req.payload.get("filter").getAsString()
-                : null;
-        int limit = 500;
-        if (req.payload != null && req.payload.has("limit")) {
-            limit = Math.max(1, Math.min(5000, req.payload.get("limit").getAsInt()));
-        }
-        if (filter != null && filter.length() > 256) {
-            return BridgeResponse.error(req.id, "filter too long (max 256 chars)");
-        }
-        try {
-            ItemRegistryProvider.ListResult result = itemRegistryProvider.listItems(filter, limit);
-            ItemListDto dto = new ItemListDto(result.items(), result.total());
-            return BridgeResponse.success(req.id, GSON_OMIT_NULLS.toJsonTree(dto), null);
-        } catch (Exception e) {
-            return BridgeResponse.error(req.id, "Item list query failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 

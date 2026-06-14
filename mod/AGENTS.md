@@ -2,9 +2,8 @@
 
 ## Project Shape
 
-- `core`: protocol, server, Lua bridge, mapping, snapshots, screenshots, textures, and provider interfaces. Version-agnostic.
-- `forge-1.20.1`: Forge 1.20.1 adapters (ForgeGradle 6.x, Java 17).
-- `neoforge-1.21.1`: NeoForge 1.21.1 adapters (NeoForge moddev, Java 21).
+- `core`: protocol, server, Groovy bridge, mapping, snapshots, screenshots, textures, and provider interfaces. It must stay independent of Fabric implementation packages.
+- `fabric-*`: Minecraft-version-specific adapters. Version APIs stay inside their own Fabric module.
 
 ## Building
 

@@ -1,11 +1,11 @@
 plugins {
-    id("com.diffplug.spotless") version "8.5.1" apply false
-    id("dev.mixinmcp.decompile") version "0.9.0"
+    java
+    id("com.diffplug.spotless") version "8.6.0" apply false
 }
 
 allprojects {
     group = "com.debugbridge"
-    version = "1.1.2"
+    version = "2.0.0"
 
     repositories {
         mavenCentral()

@@ -7,12 +7,12 @@ import com.debugbridge.core.block.NearbyBlocksProvider;
 import com.debugbridge.core.chat.ChatHistoryProvider;
 import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
-import com.debugbridge.core.lua.ThreadDispatcher;
 import com.debugbridge.core.mapping.FabricNamespaceLookup;
 import com.debugbridge.core.mapping.MappingResolver;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
+import com.debugbridge.core.script.ThreadDispatcher;
 import com.debugbridge.core.server.BridgeServer;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
@@ -74,6 +74,7 @@ class AbstractDebugBridgeModTest {
         final List<String> errorsDisplayed = new ArrayList<>();
         final List<String> infosDisplayed = new ArrayList<>();
         int onPostTickCalls = 0;
+        int webUiStartedForBridgePort = -1;
         Consumer<Boolean> capturedWarningCallback;
         int warningScreensOpened = 0;
 
@@ -99,6 +100,12 @@ class AbstractDebugBridgeModTest {
 
         int boundPort() {
             return server == null ? -1 : server.getPort();
+        }
+
+        @Override
+        protected void startWebUi(int bridgePort) {
+            // Record the kernel's intent without opening a real HTTP socket.
+            webUiStartedForBridgePort = bridgePort;
         }
 
         @Override
@@ -206,6 +213,11 @@ class AbstractDebugBridgeModTest {
         }
 
         @Override
+        protected com.debugbridge.core.session.SessionControlProvider createSessionControlProvider() {
+            return null;
+        }
+
+        @Override
         protected boolean displayPlayerError(String m) {
             if (!playerReady) return false;
             errorsDisplayed.add(m);
@@ -265,6 +277,7 @@ class AbstractDebugBridgeModTest {
 
         assertEquals(List.of(9876, 9877, 9878), mod.portsTried, "kernel should probe in order until success");
         assertEquals(9878, mod.boundPort(), "server should bind on the first available port");
+        assertEquals(9878, mod.webUiStartedForBridgePort, "web UI should be started for the port actually bound");
     }
 
     @Test

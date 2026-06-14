@@ -6,7 +6,6 @@ import com.debugbridge.core.block.NearbyBlocksProvider;
 import com.debugbridge.core.chat.ChatHistoryProvider;
 import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
-import com.debugbridge.core.lua.DirectDispatcher;
 import com.debugbridge.core.mapping.MappingResolver;
 import com.debugbridge.core.mapping.PassthroughResolver;
 import com.debugbridge.core.protocol.dto.BlockDetailsDto;
@@ -26,7 +25,9 @@ import com.debugbridge.core.protocol.dto.SnapshotVehicleDto;
 import com.debugbridge.core.protocol.dto.SnapshotWorldDto;
 import com.debugbridge.core.protocol.dto.Vec3Dto;
 import com.debugbridge.core.screen.ScreenInspectProvider;
+import com.debugbridge.core.script.DirectDispatcher;
 import com.debugbridge.core.server.BridgeServer;
+import com.debugbridge.core.session.SessionControlProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -78,6 +79,8 @@ class ContractTest {
     private static volatile EntityDetailsDto stubEntityDetails = null;
     /** Snapshot DTO the stub will return; tests mutate per case. */
     private static volatile SnapshotDto stubSnapshot = baseSnapshot();
+    /** Session-control calls the stub records, e.g. "joinServer:host:25565:true". */
+    private static final List<String> sessionControlCalls = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     private TestClient client;
 
@@ -154,6 +157,22 @@ class ContractTest {
                 return stubEntityDetails;
             }
         });
+        server.setSessionControlProvider(new SessionControlProvider() {
+            @Override
+            public void disconnect() {
+                sessionControlCalls.add("disconnect");
+            }
+
+            @Override
+            public void joinServer(String address, boolean acceptResourcePacks) {
+                sessionControlCalls.add("joinServer:" + address + ":" + acceptResourcePacks);
+            }
+
+            @Override
+            public void quit() {
+                sessionControlCalls.add("quit");
+            }
+        });
         server.start();
         Thread.sleep(500);
     }
@@ -184,6 +203,8 @@ class ContractTest {
         stubNearbyEntities = List.of();
         stubEntityDetails = null;
         stubSnapshot = baseSnapshot();
+        server.setSessionControlEnabled(false);
+        sessionControlCalls.clear();
     }
 
     private static SnapshotDto baseSnapshot() {
@@ -215,7 +236,7 @@ class ContractTest {
 
         // Always-present fields.
         assertEquals(
-                Set.of("version", "mappingStatus", "obfuscated", "refs"),
+                Set.of("version", "mappingStatus", "obfuscated", "refs", "sessionControlEnabled"),
                 result.keySet(),
                 "status without a gameDir should emit exactly the always-present fields, " + "not null log paths. Got: "
                         + result);
@@ -240,13 +261,14 @@ class ContractTest {
                 "mappingStatus",
                 "obfuscated",
                 "refs",
+                "sessionControlEnabled",
                 "gameDir",
                 "logsDir",
                 "latestLog",
                 "latestLogExists",
                 "debugLog",
                 "debugLogExists");
-        assertEquals(expected, result.keySet(), "status with gameDir set should emit all 10 fields. Got: " + result);
+        assertEquals(expected, result.keySet(), "status with gameDir set should emit all 11 fields. Got: " + result);
         assertTrue(result.get("latestLogExists").getAsBoolean(), "latest.log was created");
         assertFalse(result.get("debugLogExists").getAsBoolean(), "debug.log was not created");
         assertTrue(
@@ -850,11 +872,90 @@ class ContractTest {
         return call("search", payload);
     }
 
+    // ==================== session control ====================
+
+    @Test
+    void testSessionControlDisabledByDefault() throws Exception {
+        JsonObject join = new JsonObject();
+        join.addProperty("address", "localhost:25565");
+
+        assertTrue(callExpectError("disconnect", new JsonObject()).contains("disabled"));
+        assertTrue(callExpectError("joinServer", join).contains("disabled"));
+        assertTrue(callExpectError("quit", new JsonObject()).contains("disabled"));
+        assertTrue(sessionControlCalls.isEmpty(), "provider must not be reached while disabled");
+    }
+
+    @Test
+    void testSessionControlDispatchesWhenEnabled() throws Exception {
+        server.setSessionControlEnabled(true);
+
+        JsonObject result = call("disconnect").getAsJsonObject("result");
+        assertEquals("disconnecting", result.get("status").getAsString());
+
+        JsonObject join = new JsonObject();
+        join.addProperty("address", "  localhost:25565  ");
+        result = call("joinServer", join).getAsJsonObject("result");
+        assertEquals("connecting", result.get("status").getAsString());
+        assertEquals("localhost:25565", result.get("address").getAsString(), "address should be trimmed");
+
+        join = new JsonObject();
+        join.addProperty("address", "example.com");
+        join.addProperty("acceptResourcePacks", false);
+        call("joinServer", join);
+
+        result = call("quit").getAsJsonObject("result");
+        assertEquals("quitting", result.get("status").getAsString());
+
+        assertEquals(
+                List.of("disconnect", "joinServer:localhost:25565:true", "joinServer:example.com:false", "quit"),
+                sessionControlCalls);
+    }
+
+    @Test
+    void testJoinServerRejectsBadAddress() throws Exception {
+        server.setSessionControlEnabled(true);
+
+        assertTrue(callExpectError("joinServer", new JsonObject()).contains("'address'"));
+
+        JsonObject blank = new JsonObject();
+        blank.addProperty("address", "   ");
+        assertTrue(callExpectError("joinServer", blank).contains("'address'"));
+
+        assertTrue(sessionControlCalls.isEmpty(), "provider must not see invalid requests");
+    }
+
+    @Test
+    void testStatusReportsSessionControlCapability() throws Exception {
+        assertFalse(call("status")
+                .getAsJsonObject("result")
+                .get("sessionControlEnabled")
+                .getAsBoolean());
+
+        server.setSessionControlEnabled(true);
+        assertTrue(call("status")
+                .getAsJsonObject("result")
+                .get("sessionControlEnabled")
+                .getAsBoolean());
+    }
+
     private JsonObject call(String type) throws Exception {
         return call(type, new JsonObject());
     }
 
     private JsonObject call(String type, JsonObject payload) throws Exception {
+        JsonObject resp = callRaw(type, payload);
+        assertTrue(resp.get("success").getAsBoolean(), "Request failed: " + resp);
+        return resp;
+    }
+
+    /** As {@link #call} but expecting failure; returns the error message. */
+    private String callExpectError(String type, JsonObject payload) throws Exception {
+        JsonObject resp = callRaw(type, payload);
+        assertFalse(resp.get("success").getAsBoolean(), "Expected failure, got: " + resp);
+        return resp.get("error").getAsString();
+    }
+
+    private JsonObject callRaw(String type, JsonObject payload) throws Exception {
         JsonObject req = new JsonObject();
         req.addProperty("id", "ct_" + System.nanoTime());
         req.addProperty("type", type);
@@ -863,9 +964,7 @@ class ContractTest {
         String response = client.responses.poll(5, TimeUnit.SECONDS);
         assertNotNull(response, "No response within 5s");
         JsonElement el = JsonParser.parseString(response);
-        JsonObject resp = el.getAsJsonObject();
-        assertTrue(resp.get("success").getAsBoolean(), "Request failed: " + resp);
-        return resp;
+        return el.getAsJsonObject();
     }
 
     private JsonObject sendBlockDetails(int x, int y, int z) throws Exception {
