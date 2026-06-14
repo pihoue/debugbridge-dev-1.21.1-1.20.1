@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
  *   <li>Port-range wraparound when preferred port is past the start.
  *   <li>All ports exhausted → {@code startupError} populated.
  *   <li>Preferred port out-of-range clamps before probing.
- *   <li>{@code startupInfo} only fires when chosen port differs from preferred.
+   *   <li>{@code startupInfo} always fires with the bridge WebSocket URL.
  *   <li>Tick routing: error/info displayed when player ready, retained when not.
  *   <li>{@code onPostTick} fires every tick.
  *   <li>Warning-screen flow: shown once when ready, accept → server starts,
@@ -344,7 +344,8 @@ class AbstractDebugBridgeModTest {
 
         runStartServer(mod);
 
-        assertNull(mod.startupInfo, "startupInfo should stay null when preferred port was successfully bound");
+        assertNotNull(mod.startupInfo, "startupInfo should show bridge URL even when preferred port matches");
+        assertTrue(mod.startupInfo.startsWith("Bridge: ws://localhost:9876"), "startupInfo must include the bridge URL");
     }
 
     @Test

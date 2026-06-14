@@ -168,21 +168,16 @@ public abstract class AbstractDebugBridgeMod {
         startWebUi(actualPort);
 
         StringBuilder info = new StringBuilder();
+        info.append("Bridge: ws://localhost:").append(actualPort);
         if (actualPort != config.port) {
-            info.append("Server started on port ")
-                    .append(actualPort)
-                    .append(" (default ")
-                    .append(config.port)
-                    .append(" was in use)");
+            info.append(" (default ").append(config.port).append(" was in use)");
         }
         if (webUiServer != null) {
-            if (info.length() > 0) info.append(" — ");
-            info.append("Web UI: http://localhost:").append(webUiServer.getPort());
+            info.append(" — Web UI: http://localhost:").append(webUiServer.getPort());
         }
-        if (info.length() > 0) {
-            startupInfo = info.toString();
-        }
+        startupInfo = info.toString();
         LOG.info("[DebugBridge] Server started on port " + actualPort);
+        onServerStarted(actualPort);
     }
 
     /**
@@ -405,6 +400,15 @@ public abstract class AbstractDebugBridgeMod {
      * callback.
      */
     protected abstract void showWarningScreen(Consumer<Boolean> onResult);
+
+    /**
+     * Called at the end of {@link #startServer()} after the bridge and web UI
+     * servers are known to be running. Subclasses can override to display a
+     * startup message to the player directly using version-specific APIs.
+     * Default no-op.
+     */
+    protected void onServerStarted(int actualPort) {
+    }
 
     /**
      * Per-tick hook between startup-message routing and the warning-screen

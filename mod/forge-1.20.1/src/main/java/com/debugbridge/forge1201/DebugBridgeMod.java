@@ -37,6 +37,8 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
@@ -52,6 +54,17 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
         FMLJavaModLoadingContext.get().getModEventBus().addListener(this::onClientSetup);
     }
 
+    private void onClientSetup(final FMLClientSetupEvent event) {
+        MinecraftForge.EVENT_BUS.addListener(this::onClientTickEvent);
+        initialize();
+    }
+
+    private void onClientTickEvent(final TickEvent.ClientTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            handleTick();
+        }
+    }
+
     public static void onClientTick(Minecraft mc) {
         if (INSTANCE != null) INSTANCE.handleTick();
     }
@@ -62,10 +75,6 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
 
     public static void onClientClose(Minecraft mc) {
         if (INSTANCE != null) INSTANCE.handleClose();
-    }
-
-    private void onClientSetup(final FMLClientSetupEvent event) {
-        initialize();
     }
 
     @Override
@@ -124,6 +133,10 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     @Override
     protected ScreenshotProvider createScreenshotProvider() {
         return new Minecraft1201ScreenshotProvider();
+    }
+
+    @Override
+    protected void onServerStarted(int actualPort) {
     }
 
     @Override
