@@ -6,7 +6,7 @@ license="MIT"
 modId="debugbridge"
 version="${version}"
 displayName="DebugBridge (Forge 1.20.1)"
-description="WebSocket REPL into the running Minecraft client. Lua-Java bridge with auto-downloaded Mojang mappings."
+description="WebSocket REPL into the running Minecraft client. Groovy-Java bridge with auto-downloaded Mojang mappings."
 authors="Weikeng Chen"
 environment="CLIENT"
 

@@ -1,6 +1,5 @@
 plugins {
     id("net.neoforged.moddev") version "2.0.72"
-    // Shadow: 包重定位，避免内嵌 luaj 时与其他模组发生 JPMS/classpath 冲突
     id("com.gradleup.shadow") version "9.0.0-beta4"
 }
 
@@ -26,22 +25,39 @@ dependencies {
     implementation("org.java-websocket:Java-WebSocket:1.6.0") {
         exclude(group = "org.slf4j")
     }
-    // luaj 作为编译期依赖（core 源码使用），不由 jarJar 直接嵌入
-    implementation("org.luaj:luaj-jse:3.0.1")
-    // Gson version pinned to match NeoForge 21.1.x bundled version
+    implementation("org.apache.groovy:groovy:5.0.6")
     implementation("com.google.code.gson:gson:2.10.1")
-
-    // luaj 不由 jarJar 直接嵌入，而是由 Shadow 重定位后打包
-    jarJar("org.java-websocket:Java-WebSocket:1.6.0") {
-        exclude(group = "org.slf4j")
-    }
-    // Gson excluded from jarJar — NeoForge bundles it already.
 }
 
 configurations.implementation {
     resolutionStrategy {
         force("org.slf4j:slf4j-api:2.0.9")
     }
+}
+
+// Shadow: produce a fat JAR with dependencies for dev & production
+tasks.shadowJar {
+    archiveClassifier.set("")
+    dependencies {
+        include(dependency("org.java-websocket:Java-WebSocket:.*"))
+        include(dependency("org.apache.groovy:groovy:.*"))
+        // Gson excluded — NeoForge bundles it already
+    }
+    // Include the core module's web UI resources
+    from(project(":core").tasks.named("processResources")) {
+        include("webui/**")
+    }
+    // Exclude NeoForge / Minecraft content that leaks from the project output
+    exclude("net/minecraft/**")
+    exclude("net/neoforged/**")
+    exclude("com/mojang/**")
+    exclude("com/google/gson/**")  // already provided by NeoForge
+    exclude("mcp/**")
+    exclude("META-INF/maven/**")
+    exclude("META-INF/jarjar/**")
+    exclude("META-INF/services/net.neoforged.**")
+    // Avoid ZIP corruption from duplicate Groovy multi-release entries
+    exclude("META-INF/versions/**")
 }
 
 neoForge {
@@ -58,42 +74,13 @@ neoForge {
     }
 }
 
-// Shadow: 将 luaj 包重定位到 com.debugbridge.luaj
-// 这样即使其他模组也内嵌 org.luaj，也不会产生类冲突
-tasks.shadowJar {
-    archiveClassifier.set("")
-
-    // 仅打包 luaj 和 websocket，不打包 Minecraft/NeoForge 等运行环境类
-    dependencies {
-        include(dependency("org.luaj:luaj-jse:.*"))
-        include(dependency("org.java-websocket:Java-WebSocket:.*"))
-    }
-
-    relocate("org.luaj", "com.debugbridge.luaj")
-
-    // 排除 Minecraft/NeoForge 游戏资源、运行环境依赖和无关工具类
-    exclude("assets/**")
-    exclude("data/**")
-    exclude("net/minecraft/**")
-    exclude("net/neoforged/**")
-    exclude("com/mojang/**")
-    exclude("mcp/**")
-    exclude("lua.class")           // luaj CLI 启动器（非库类）- 精确匹配避免误伤
-    exclude("luac.class")
-    exclude("luajc*.class")
-    exclude("META-INF/jarjar/**")
-    exclude("META-INF/maven/**")
-    exclude("META-INF/versions/**")
-    exclude("META-INF/services/net.neoforged.**")
-}
-
-// Deploy the Shadow JAR (relocated luaj + bundled ws) alongside the source-set mod
+// Deploy Shadow JAR to run/mods/ so the fat JAR (with bundled deps) is used in dev
 tasks.named("prepareClientRun") {
     dependsOn(tasks.named("shadowJar"))
     doLast {
-        val runMods = layout.projectDirectory.dir("run/mods").asFile.also { it.mkdirs() }
+        val runModsDir = layout.projectDirectory.dir("run/mods").asFile.also { it.mkdirs() }
         val jar = tasks.named("shadowJar").get().outputs.files.singleFile
-        jar.copyTo(File(runMods, jar.name), overwrite = true)
+        jar.copyTo(File(runModsDir, jar.name), overwrite = true)
         logger.lifecycle("[debugbridge] Deployed {} -> run/mods/", jar.name)
     }
 }

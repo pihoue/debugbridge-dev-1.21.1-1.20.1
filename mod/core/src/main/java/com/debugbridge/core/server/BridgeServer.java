@@ -333,10 +333,9 @@ public class BridgeServer extends WebSocketServer {
                 case "snapshot" -> handleSnapshot(req);
                 case "screenshot" -> handleScreenshot(req);
                 case "record_video" -> handleRecordVideo(req);
-                case "runCommand" ->
-                    runCommandEnabled
-                            ? handleRunCommand(req)
-                            : BridgeResponse.error(req.id, "Unknown request type: runCommand");
+                case "runCommand" -> runCommandEnabled
+                        ? handleRunCommand(req)
+                        : BridgeResponse.error(req.id, "Unknown request type: runCommand");
                 case "status" -> handleStatus(req);
                 case "getItemTexture" -> handleGetItemTexture(req);
                 case "getEntityItemTexture" -> handleGetEntityItemTexture(req);
@@ -632,8 +631,8 @@ public class BridgeServer extends WebSocketServer {
             switch (s) {
                 case "grid" -> output = RecordingRequest.OutputMode.GRID;
                 case "frames" -> output = RecordingRequest.OutputMode.FRAMES;
-                default ->
-                    throw new IllegalArgumentException("output must be \"grid\" or \"frames\", got \"" + s + "\"");
+                default -> throw new IllegalArgumentException(
+                        "output must be \"grid\" or \"frames\", got \"" + s + "\"");
             }
         }
 

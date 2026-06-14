@@ -153,7 +153,8 @@ class GroovyObfuscatedDispatchTest {
 
     @Test
     void wrappedObjectAsArgumentSelectsObjectOverload() {
-        Object out = eval("""
+        Object out = eval(
+                """
                 def V = java.type('fake.Vec')
                 def a = V(1, 2, 3)
                 def b = V(4, 5, 6)
@@ -166,7 +167,8 @@ class GroovyObfuscatedDispatchTest {
     void decimalLiteralsSelectPrimitiveOverload() {
         // Groovy decimal literals are BigDecimal; they must coerce to double
         // and pick the (double,double,double) overload's runtime name.
-        Object out = eval("""
+        Object out = eval(
+                """
                 def V = java.type('fake.Vec')
                 return java.type('fake.Vec')(1, 2, 3).add(0.5, 0.5, 0.5).x
                 """);
@@ -181,7 +183,8 @@ class GroovyObfuscatedDispatchTest {
 
     @Test
     void methodsListingShowsEveryOverloadUnderItsMojangName() {
-        Object out = eval("""
+        Object out = eval(
+                """
                 def a = java.type('fake.Vec')(1, 2, 3)
                 return java.methods(a, 'add')
                 """);
@@ -198,7 +201,8 @@ class GroovyObfuscatedDispatchTest {
 
     @Test
     void equalityDelegatesToWrappedObject() {
-        Object out = eval("""
+        Object out = eval(
+                """
                 def V = java.type('fake.Vec')
                 return V(1, 2, 3) == V(1, 2, 3)
                 """);

@@ -10,7 +10,8 @@ import org.junit.jupiter.api.Test;
 
 class ProGuardParserTest {
 
-    private static final String SAMPLE_MAPPINGS = """
+    private static final String SAMPLE_MAPPINGS =
+            """
             # This is a comment
             net.minecraft.client.Minecraft -> eev:
                 net.minecraft.client.player.LocalPlayer player -> s

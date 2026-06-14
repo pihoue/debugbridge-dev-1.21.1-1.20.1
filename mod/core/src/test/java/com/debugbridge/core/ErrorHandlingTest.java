@@ -109,7 +109,8 @@ class ErrorHandlingTest {
 
     @Test
     void testMethodNotFound() throws Exception {
-        JsonObject resp = execute("""
+        JsonObject resp = execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.nonExistentMethod()
                 """);
@@ -120,7 +121,8 @@ class ErrorHandlingTest {
 
     @Test
     void testMethodWrongArgCount() throws Exception {
-        JsonObject resp = execute("""
+        JsonObject resp = execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.add("a", "b", "c", "d", "e")
                 """);
@@ -182,7 +184,8 @@ class ErrorHandlingTest {
 
     @Test
     void testListOnNonCollection() throws Exception {
-        JsonObject resp = execute("""
+        JsonObject resp = execute(
+                """
                 def map = java.type("java.util.HashMap").create()
                 java.list(map)
                 """);
@@ -229,7 +232,8 @@ class ErrorHandlingTest {
 
     @Test
     void testJavaExceptionInMethod() throws Exception {
-        JsonObject resp = execute("""
+        JsonObject resp = execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return list.get(0)
                 """);

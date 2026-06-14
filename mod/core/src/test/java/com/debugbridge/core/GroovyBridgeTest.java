@@ -37,7 +37,7 @@ class GroovyBridgeTest {
     void testPrintCapture() {
         var result = runtime.execute("println 'hello'\nprintln 'world'");
         assertTrue(result.isSuccess(), "Error: " + result.error);
-        assertEquals("hello\nworld\n", result.output);
+        assertEquals("hello\nworld\n", result.output.replace("\r\n", "\n"));
     }
 
     @Test
@@ -50,7 +50,8 @@ class GroovyBridgeTest {
 
     @Test
     void testTypeConstructAndMethodCall() {
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.add("hello")
                 list.add("world")
@@ -62,7 +63,8 @@ class GroovyBridgeTest {
 
     @Test
     void testConstructViaCallOperator() {
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def Sb = java.type("java.lang.StringBuilder")
                 def sb = Sb("hello")
                 sb.append(" world")
@@ -89,7 +91,8 @@ class GroovyBridgeTest {
     @Test
     void testNativeGroovyInterop() {
         // On a deobfuscated classpath Groovy can construct + call natively.
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def list = new java.util.ArrayList()
                 list.add("x")
                 list.add("y")
@@ -101,7 +104,8 @@ class GroovyBridgeTest {
 
     @Test
     void testJavaList() {
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.add("a")
                 list.add("b")
@@ -114,7 +118,8 @@ class GroovyBridgeTest {
 
     @Test
     void testDescribe() {
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return java.describe(list)['class']
                 """);
@@ -124,7 +129,8 @@ class GroovyBridgeTest {
 
     @Test
     void testMethodsReflection() {
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return java.methods(list, "add").size() > 0
                 """);
@@ -160,7 +166,8 @@ class GroovyBridgeTest {
 
     @Test
     void testComplexScenario() {
-        var result = runtime.execute("""
+        var result = runtime.execute(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.add("alpha")
                 list.add("beta")

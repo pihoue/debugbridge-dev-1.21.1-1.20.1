@@ -3,7 +3,7 @@
 ## Project Shape
 
 - `core`: protocol, server, Groovy bridge, mapping, snapshots, screenshots, textures, and provider interfaces. It must stay independent of Fabric implementation packages.
-- `fabric-*`: Minecraft-version-specific adapters. Version APIs stay inside their own Fabric module.
+- `forge-1.20.1, neoforge-1.21.1, fabric-*`: Minecraft-version-specific adapters. Version APIs stay inside their own Fabric module.
 
 ## Building
 

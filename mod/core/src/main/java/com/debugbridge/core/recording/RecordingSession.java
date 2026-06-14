@@ -124,14 +124,12 @@ final class RecordingSession {
         try {
             return future.get(req.frames * 200L + 30_000L, TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
-            throw new RecordingException(
-                    "Recording timed out after " + (req.frames * 200L + 30_000L) + "ms");
+            throw new RecordingException("Recording timed out after " + (req.frames * 200L + 30_000L) + "ms");
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RecordingException re) throw re;
             if (cause instanceof RuntimeException rte) throw rte;
-            throw new RecordingException(
-                    "unexpected failure: " + (cause == null ? "null" : cause.getMessage()));
+            throw new RecordingException("unexpected failure: " + (cause == null ? "null" : cause.getMessage()));
         }
     }
 

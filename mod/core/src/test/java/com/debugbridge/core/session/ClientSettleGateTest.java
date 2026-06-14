@@ -143,25 +143,21 @@ class ClientSettleGateTest {
 
     @Test
     void actionExceptionPropagatesToCaller() {
-        IllegalStateException e = assertThrows(
-                IllegalStateException.class,
-                () -> gate(() -> true)
-                        .runWhenSettled(
-                                () -> {
-                                    throw new IllegalStateException("connect blew up");
-                                },
-                                1_000));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> gate(() -> true)
+                .runWhenSettled(
+                        () -> {
+                            throw new IllegalStateException("connect blew up");
+                        },
+                        1_000));
         assertEquals("connect blew up", e.getMessage());
     }
 
     @Test
     void settledCheckExceptionPropagatesToCaller() {
-        IllegalStateException e = assertThrows(
-                IllegalStateException.class,
-                () -> gate(() -> {
-                            throw new IllegalStateException("overlay probe failed");
-                        })
-                        .runWhenSettled(() -> fail("must not run"), 1_000));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> gate(() -> {
+                    throw new IllegalStateException("overlay probe failed");
+                })
+                .runWhenSettled(() -> fail("must not run"), 1_000));
         assertEquals("overlay probe failed", e.getMessage());
     }
 }

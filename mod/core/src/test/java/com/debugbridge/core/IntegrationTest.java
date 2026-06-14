@@ -79,7 +79,8 @@ class IntegrationTest {
 
     @Test
     void testExecuteJavaBridge() throws Exception {
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.add("one")
                 list.add("two")
@@ -126,7 +127,8 @@ class IntegrationTest {
 
     @Test
     void testReflectionDescribe() throws Exception {
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return java.describe(list)['class']
                 """);
@@ -138,7 +140,8 @@ class IntegrationTest {
 
     @Test
     void testReflectionMethods() throws Exception {
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return java.methods(list, "add").size()
                 """);
@@ -148,7 +151,8 @@ class IntegrationTest {
 
     @Test
     void testReflectionSupers() throws Exception {
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return java.supers(list).hierarchy
                 """);
@@ -157,7 +161,8 @@ class IntegrationTest {
 
     @Test
     void testReflectionFields() throws Exception {
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 return java.fields(list)
                 """);
@@ -167,7 +172,8 @@ class IntegrationTest {
     @Test
     void testComplexReflectionWorkflow() throws Exception {
         // Simulates what an agent would do to explore an unknown object.
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def map = java.type("java.util.HashMap").create()
                 map.put("key1", "value1")
                 map.put("key2", "value2")
@@ -188,7 +194,8 @@ class IntegrationTest {
 
     @Test
     void testListOverWebSocket() throws Exception {
-        JsonObject resp = executeCode("""
+        JsonObject resp = executeCode(
+                """
                 def list = java.type("java.util.ArrayList").create()
                 list.add("alpha")
                 list.add("beta")

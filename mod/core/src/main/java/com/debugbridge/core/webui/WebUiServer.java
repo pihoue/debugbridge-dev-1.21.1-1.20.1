@@ -4,7 +4,6 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -68,7 +67,7 @@ public final class WebUiServer {
             return null;
         }
         try {
-            HttpServer http = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 0);
+            HttpServer http = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
             WebUiServer server = new WebUiServer(http, resourceRoot);
             http.createContext("/", server::handle);
             http.setExecutor(Executors.newFixedThreadPool(2, r -> {

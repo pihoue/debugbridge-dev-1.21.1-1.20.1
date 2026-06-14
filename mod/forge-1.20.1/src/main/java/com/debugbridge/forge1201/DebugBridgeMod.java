@@ -18,7 +18,6 @@ import com.debugbridge.core.protocol.dto.SnapshotVehicleDto;
 import com.debugbridge.core.protocol.dto.SnapshotWorldDto;
 import com.debugbridge.core.protocol.dto.Vec3Dto;
 import com.debugbridge.core.recording.FrameCapturer;
-import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.session.SessionControlProvider;
@@ -163,13 +162,8 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     }
 
     @Override
-    protected ItemRegistryProvider createItemRegistryProvider() {
-        return new Minecraft1201ItemRegistryProvider();
-    }
-
-    @Override
     protected SessionControlProvider createSessionControlProvider() {
-        return new Minecraft119SessionControlProvider();
+        return null; // TODO: forge-specific session control
     }
 
     @Override

@@ -18,14 +18,12 @@ import com.debugbridge.core.protocol.dto.SnapshotVehicleDto;
 import com.debugbridge.core.protocol.dto.SnapshotWorldDto;
 import com.debugbridge.core.protocol.dto.Vec3Dto;
 import com.debugbridge.core.recording.FrameCapturer;
-import com.debugbridge.core.registry.ItemRegistryProvider;
 import com.debugbridge.core.screen.ScreenInspectProvider;
 import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.session.SessionControlProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.text.TextLinks;
 import com.debugbridge.core.texture.ItemTextureProvider;
-import java.net.URI;
 import java.nio.file.Path;
 import java.util.function.Consumer;
 import net.minecraft.client.Minecraft;
@@ -166,13 +164,8 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
     }
 
     @Override
-    protected ItemRegistryProvider createItemRegistryProvider() {
-        return new Minecraft1211ItemRegistryProvider();
-    }
-
-    @Override
     protected SessionControlProvider createSessionControlProvider() {
-        return new Minecraft12111SessionControlProvider();
+        return null; // TODO: neoforge-specific session control
     }
 
     @Override
@@ -200,14 +193,8 @@ public class DebugBridgeMod extends AbstractDebugBridgeMod {
         MutableComponent root = Component.literal("[DebugBridge] ");
         for (TextLinks.Segment seg : TextLinks.split(message)) {
             if (seg.isLink()) {
-                ClickEvent open;
-                try {
-                    // 1.21.x: ClickEvent is an interface with record impls.
-                    open = new ClickEvent.OpenUrl(URI.create(seg.text()));
-                } catch (IllegalArgumentException e) {
-                    root.append(Component.literal(seg.text()));
-                    continue;
-                }
+                // 1.21.1: ClickEvent uses legacy constructor with Action.OPEN_URL
+                ClickEvent open = new ClickEvent(ClickEvent.Action.OPEN_URL, seg.text());
                 root.append(Component.literal(seg.text())
                         .withStyle(
                                 s -> s.withColor(0x55FFFF).withUnderlined(true).withClickEvent(open)));
