@@ -1,6 +1,6 @@
 # DebugBridge
 
-A Fabric client mod for Minecraft (1.19, 1.21.11, and 26.2 development snapshots) that exposes game state over a local WebSocket server, plus a Vue web UI for visual inspection. Built for AI-assisted Minecraft development and debugging.
+A Fabric client mod for Minecraft (1.21.1 and 1.20.1 development snapshots) that exposes game state over a local WebSocket server, plus a Vue web UI for visual inspection. Built for AI-assisted Minecraft development and debugging.
 
 ## What It Does
 
