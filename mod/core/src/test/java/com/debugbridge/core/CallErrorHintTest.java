@@ -71,7 +71,7 @@ class CallErrorHintTest {
 
     @AfterAll
     static void stopServer() throws Exception {
-        if (server != null) server.stop();
+        if (server != null) server.stop(1000);
     }
 
     @BeforeEach
