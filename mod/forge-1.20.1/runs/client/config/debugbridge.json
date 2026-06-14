@@ -1,7 +1,0 @@
-{
-  "port": 9877,
-  "developer_mode_accepted": true,
-  "web_ui_enabled": true,
-  "run_command_enabled": false,
-  "session_control_enabled": false
-}
