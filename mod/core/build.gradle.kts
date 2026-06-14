@@ -2,6 +2,10 @@ plugins {
     java
 }
 
+tasks.withType<JavaCompile>().configureEach {
+    options.release.set(17)
+}
+
 dependencies {
     // LuaJ - pure Java Lua 5.2 implementation
     implementation("org.luaj:luaj-jse:3.0.1")

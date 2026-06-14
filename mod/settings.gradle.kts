@@ -12,6 +12,7 @@ rootProject.name = "debugbridge"
 
 include(":core")
 
+// ForgeGradle 6.x does not support Gradle 9+; NeoForge's moddev plugin requires Gradle 8.5+.
 val gradleBase = org.gradle.util.GradleVersion.current().baseVersion
 if (gradleBase < org.gradle.util.GradleVersion.version("9.0")) {
     if (file("forge-1.20.1/build.gradle.kts").exists() || file("forge-1.20.1/build.gradle").exists()) {

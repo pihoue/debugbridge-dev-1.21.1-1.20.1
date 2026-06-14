@@ -6,6 +6,7 @@ import com.debugbridge.core.chat.ChatHistoryProvider;
 import com.debugbridge.core.entity.ClientEntityGlowManager;
 import com.debugbridge.core.entity.LookedAtEntityProvider;
 import com.debugbridge.core.entity.NearbyEntitiesProvider;
+import com.debugbridge.core.lua.DirectDispatcher;
 import com.debugbridge.core.lua.LuaRuntime;
 import com.debugbridge.core.lua.ThreadDispatcher;
 import com.debugbridge.core.mapping.MappingResolver;
@@ -17,12 +18,12 @@ import com.debugbridge.core.protocol.dto.ChatHistoryDto;
 import com.debugbridge.core.protocol.dto.ChatMessageDto;
 import com.debugbridge.core.protocol.dto.EntityDetailsDto;
 import com.debugbridge.core.protocol.dto.EntitySummaryDto;
-import com.debugbridge.core.protocol.dto.ItemListDto;
 import com.debugbridge.core.protocol.dto.LookedAtEntityDto;
 import com.debugbridge.core.protocol.dto.NearbyBlocksDto;
 import com.debugbridge.core.protocol.dto.NearbyEntitiesDto;
 import com.debugbridge.core.protocol.dto.ScreenInspectDto;
 import com.debugbridge.core.protocol.dto.SearchResultDto;
+import com.debugbridge.core.protocol.dto.ItemListDto;
 import com.debugbridge.core.protocol.dto.SlotDto;
 import com.debugbridge.core.protocol.dto.SnapshotDto;
 import com.debugbridge.core.protocol.dto.StatusDto;
@@ -37,7 +38,6 @@ import com.debugbridge.core.screenshot.ScreenshotProvider;
 import com.debugbridge.core.snapshot.GameStateProvider;
 import com.debugbridge.core.texture.ItemTextureProvider;
 import com.google.gson.*;
-import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -52,161 +52,237 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
-import org.java_websocket.WebSocket;
-import org.java_websocket.handshake.ClientHandshake;
-import org.java_websocket.server.WebSocketServer;
 
 /**
  * WebSocket server that accepts Lua script execution requests and other commands.
  * Runs inside the Minecraft JVM. Accepts one client (the MCP server) at a time.
  */
-public class BridgeServer extends WebSocketServer {
+public class BridgeServer {
     private static final Logger LOG = Logger.getLogger("DebugBridge");
-    /** Default serializer: nulls become {@code "field": null} on the wire.
-     * Used for endpoints whose schema treats null as a meaningful value
-     * (e.g. {@code lookedAtEntity.entityId}). */
+    /** Default serializer: nulls become {@code "field": null} on the wire. */
     private static final Gson GSON = new GsonBuilder().serializeNulls().create();
-    /** Omit-nulls serializer: null fields disappear from the JSON entirely.
-     * Used for endpoints with conditional fields (e.g. {@code status} only
-     * emits {@code gameDir}/{@code logsDir}/etc. when the host mod has set a
-     * game directory). */
+    /** Omit-nulls serializer: null fields disappear from the JSON entirely. */
     private static final Gson GSON_OMIT_NULLS = new Gson();
 
-    private final LuaRuntime lua;
+    /** Lazily-created WebSocket server handle. Loaded on first start() call,
+     *  so the Java-WebSocket library only needs to be on the classpath at
+     *  that point (not when BridgeServer itself is loaded). */
+    private volatile ServerHandle handle;
+
+    private final int port;
+    private volatile LuaRuntime lua;
     private final MappingResolver resolver;
-    private final ThreadDispatcher dispatcher;
+    private final com.debugbridge.core.lua.ThreadDispatcher dispatcher;
     private final ObjectRefStore refs;
-    private final ResultSerializer serializer;
+    private volatile ResultSerializer serializer;
     private final GameStateProvider stateProvider;
     private final ScreenshotProvider screenshotProvider;
-    /**
-     * Absolute path to the game run directory (the .minecraft / profile root),
-     * or {@code null} if the embedder didn't provide one. When non-null, the
-     * status endpoint exposes {@code gameDir} / {@code latestLog} / {@code debugLog}
-     * so a connecting MCP client can read logs via its own file-read tools.
-     */
     private volatile Path gameDir;
-
-    /**
-     * Item texture resolver. Set by the version-specific module.
-     */
     private volatile ItemTextureProvider textureProvider;
-
-    /**
-     * Nearby entities query provider. Set by the version-specific module.
-     */
     private volatile NearbyEntitiesProvider entitiesProvider;
-
-    /**
-     * Nearby block-entities query provider. Set by the version-specific module.
-     */
     private volatile NearbyBlocksProvider blocksProvider;
-
-    /**
-     * Raycast-based "what is the player aiming at" provider. Set by the
-     * version-specific module.
-     */
     private volatile LookedAtEntityProvider lookedAtEntityProvider;
-
-    /**
-     * Recent client-side chat messages. Set by the version-specific module.
-     */
     private volatile ChatHistoryProvider chatHistoryProvider;
-
-    /**
-     * Currently-open screen / container introspection. Set by the
-     * version-specific module.
-     */
     private volatile ScreenInspectProvider screenInspectProvider;
-
-    /**
-     * Item registry query provider for native item ID enumeration.
-     * Set by the version-specific module. Null disables the
-     * {@code listItems} endpoint.
-     */
-    private volatile ItemRegistryProvider itemRegistryProvider;
-
-    /**
-     * Multi-frame framebuffer capture provider. Set by the version-specific
-     * module. Null disables the {@code record_video} endpoint (older test
-     * harnesses don't wire it).
-     */
     private volatile RecordingProvider recordingProvider;
-
-    /**
-     * Callback for bind errors (e.g., port already in use). Called from the
-     * WebSocket selector thread when the server fails to bind.
-     */
+    private volatile ItemRegistryProvider itemRegistryProvider;
     private volatile Consumer<Exception> bindErrorCallback;
-
-    /**
-     * Callback invoked from the server thread once the socket is bound and the
-     * accept loop is running. Paired with {@link #bindErrorCallback} so callers
-     * can synchronously wait for the async start to complete.
-     */
     private volatile Runnable startCallback;
-
-    /**
-     * Whether slash-command execution via the bridge is honored. When false
-     * runCommand requests behave as if they don't exist.
-     */
+    private boolean reuseAddr = false;
     private volatile boolean runCommandEnabled = false;
 
-    /**
-     * Background executor for all request handling. Every request — Lua
-     * execute, item texture, entity query, screenshot, search, etc. — is
-     * dispatched here instead of blocking the WebSocket IO thread, so the
-     * socket stays responsive (pings, keepalives) during long-running
-     * operations. A blocked IO thread is what causes the client to time out
-     * and disconnect.
-     * <p>
-     * Single-threaded to prevent concurrent access to shared mutable state
-     * ({@link com.debugbridge.core.lua.LuaRuntime#globals Lua globals},
-     * {@link com.debugbridge.core.lua.LuaRuntime#printBuffer print buffer}).
-     */
     private final ExecutorService handlerExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "bridge-handler");
         t.setDaemon(true);
         return t;
     });
 
-    /**
-     * In-flight async request-handling futures keyed by request id.
-     * Used to cancel outstanding work when the client disconnects.
-     */
     private final ConcurrentHashMap<String, Future<?>> pendingExecutions = new ConcurrentHashMap<>();
 
-    public BridgeServer(int port, MappingResolver resolver, ThreadDispatcher dispatcher) {
+    public BridgeServer(
+            int port,
+            MappingResolver resolver,
+            com.debugbridge.core.lua.ThreadDispatcher dispatcher) {
         this(port, resolver, dispatcher, null, null);
     }
 
     public BridgeServer(
-            int port, MappingResolver resolver, ThreadDispatcher dispatcher, GameStateProvider stateProvider) {
+            int port,
+            MappingResolver resolver,
+            com.debugbridge.core.lua.ThreadDispatcher dispatcher,
+            GameStateProvider stateProvider) {
         this(port, resolver, dispatcher, stateProvider, null);
     }
 
     public BridgeServer(
             int port,
             MappingResolver resolver,
-            ThreadDispatcher dispatcher,
+            com.debugbridge.core.lua.ThreadDispatcher dispatcher,
             GameStateProvider stateProvider,
             ScreenshotProvider screenshotProvider) {
-        super(new InetSocketAddress("127.0.0.1", port));
+        this.port = port;
         this.resolver = resolver;
         this.dispatcher = dispatcher;
         this.refs = new ObjectRefStore();
-        this.lua = new LuaRuntime(resolver, dispatcher, refs);
-        this.serializer = new ResultSerializer(resolver, refs);
         this.stateProvider = stateProvider;
         this.screenshotProvider = screenshotProvider;
-        setReuseAddr(true);
-        // Enable server-side ping/pong keepalive so the client detects a dead
-        // connection within 30 seconds rather than hanging forever.
-        setConnectionLostTimeout(30);
+        // LuaRuntime and ResultSerializer created lazily on first execute()
+    }
+
+    public synchronized void setReuseAddr(boolean reuse) {
+        this.reuseAddr = reuse;
+        var h = handle;
+        if (h != null) h.setReuseAddr(reuse);
+    }
+
+    /** Set a callback invoked when the WebSocket server has bound and started. */
+    public void setStartCallback(Runnable callback) {
+        this.startCallback = callback;
+    }
+
+    /** Start the underlying WebSocket server. Thread-safe; actual binding
+     *  happens asynchronously in the WebSocket selector thread. */
+    public synchronized void start() {
+        if (handle != null) return;
+        handle = new ServerHandle(port, reuseAddr);
+        handle.start();
+    }
+
+    /** Gracefully stop the server. No-op if not running. */
+    public synchronized void stop(int timeout) throws InterruptedException {
+        if (handle == null) return;
+        handle.stop(timeout);
+    }
+
+    /** Port this server was configured for. */
+    public int getPort() { return port; }
+
+    // -- Inner WebSocket server (lazily loaded) --
+
+    /** Extends WebSocketServer so that Java-WebSocket is only loaded when
+     *  this inner class is first referenced (i.e. on start()). */
+    private final class ServerHandle extends org.java_websocket.server.WebSocketServer {
+        ServerHandle(int port, boolean reuseAddr) {
+            super(new InetSocketAddress("127.0.0.1", port));
+            setReuseAddr(reuseAddr);
+            setConnectionLostTimeout(30);
+        }
+
+        @Override
+        public void onOpen(org.java_websocket.WebSocket conn, org.java_websocket.handshake.ClientHandshake handshake) {
+            BridgeServer.this.onOpen(conn, handshake);
+        }
+
+        @Override
+        public void onClose(org.java_websocket.WebSocket conn, int code, String reason, boolean remote) {
+            BridgeServer.this.onClose(conn, code, reason, remote);
+        }
+
+        @Override
+        public void onMessage(org.java_websocket.WebSocket conn, String message) {
+            BridgeServer.this.onMessage(conn, message);
+        }
+
+        @Override
+        public void onError(org.java_websocket.WebSocket conn, Exception ex) {
+            BridgeServer.this.onError(conn, ex);
+        }
+
+        @Override
+        public void onStart() {
+            BridgeServer.this.onStart();
+        }
+    }
+
+    private void onOpen(org.java_websocket.WebSocket conn, org.java_websocket.handshake.ClientHandshake handshake) {
+        LOG.info("[DebugBridge] Client connected: " + conn.getRemoteSocketAddress());
+    }
+
+    private void onClose(org.java_websocket.WebSocket conn, int code, String reason, boolean remote) {
+        LOG.info("[DebugBridge] Client disconnected: " + reason);
+        for (Future<?> f : pendingExecutions.values()) {
+            f.cancel(true);
+        }
+        pendingExecutions.clear();
+        refs.clear();
+        handlerExecutor.submit(() -> {
+            ClientEntityGlowManager.clear();
+            ClientBlockGlowManager.clear();
+        });
+    }
+
+    private void onMessage(org.java_websocket.WebSocket conn, String message) {
+        BridgeRequest req;
+        try {
+            req = GSON.fromJson(message, BridgeRequest.class);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "[DebugBridge] Failed to parse message", e);
+            try {
+                BridgeResponse resp = BridgeResponse.error("unknown", "Invalid JSON: " + e.getMessage());
+                conn.send(GSON.toJson(resp.toJson()));
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+        if (req.id == null || req.id.isEmpty()) {
+            req.id = "req-" + System.nanoTime();
+        }
+        dispatchAsync(req, conn);
+    }
+
+    private void dispatchAsync(BridgeRequest req, org.java_websocket.WebSocket conn) {
+        final String fId = req.id;
+        Future<?> future = handlerExecutor.submit(() -> {
+            try {
+                BridgeResponse resp = handleRequest(req);
+                conn.send(GSON.toJson(resp.toJson()));
+            } catch (Exception e) {
+                try {
+                    BridgeResponse resp = BridgeResponse.error(fId, "Internal error: " + e.getMessage());
+                    conn.send(GSON.toJson(resp.toJson()));
+                } catch (Exception ignored) {
+                }
+            } finally {
+                pendingExecutions.remove(fId);
+            }
+        });
+        pendingExecutions.put(req.id, future);
+    }
+
+    private void onError(org.java_websocket.WebSocket conn, Exception ex) {
+        LOG.log(Level.WARNING, "[DebugBridge] WebSocket error", ex);
+        if (conn == null
+                && (ex instanceof java.net.BindException
+                    || (ex.getCause() != null && ex.getCause() instanceof java.net.BindException))) {
+            Consumer<Exception> callback = this.bindErrorCallback;
+            if (callback != null) {
+                callback.accept(ex);
+            }
+        }
+    }
+
+    private void onStart() {
+        LOG.info("[DebugBridge] Server started on port " + getPort());
+        Runnable cb = this.startCallback;
+        if (cb != null) cb.run();
     }
 
     public LuaRuntime getLuaRuntime() {
+        if (lua == null) {
+            synchronized (this) {
+                if (lua == null) {
+                    var d = dispatcher;
+                    lua = new LuaRuntime(resolver, d != null ? d : new DirectDispatcher(), refs);
+                    serializer = new ResultSerializer(resolver, refs);
+                }
+            }
+        }
         return lua;
+    }
+
+    public ResultSerializer getSerializer() {
+        getLuaRuntime(); // ensure serializer is initialized
+        return serializer;
     }
 
     /**
@@ -239,10 +315,6 @@ public class BridgeServer extends WebSocketServer {
         LOG.info("[DebugBridge] Recording provider registered");
     }
 
-    /**
-     * Register the item registry query provider. Called by the version-specific
-     * module during initialization. Enables the {@code listItems} endpoint.
-     */
     public void setItemRegistryProvider(ItemRegistryProvider provider) {
         this.itemRegistryProvider = provider;
         LOG.info("[DebugBridge] Item registry provider registered: "
@@ -302,81 +374,6 @@ public class BridgeServer extends WebSocketServer {
         this.bindErrorCallback = callback;
     }
 
-    /**
-     * Set a callback invoked when the server has successfully bound and
-     * started its accept loop. Used together with the bind-error callback
-     * to synchronise on the async startup.
-     */
-    public void setStartCallback(Runnable callback) {
-        this.startCallback = callback;
-    }
-
-    @Override
-    public void onOpen(WebSocket conn, ClientHandshake handshake) {
-        LOG.info("[DebugBridge] Client connected: " + conn.getRemoteSocketAddress());
-    }
-
-    @Override
-    public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-        LOG.info("[DebugBridge] Client disconnected: " + reason);
-        // Cancel any in-flight request handling so a runaway handler doesn't
-        // keep dispatching to the game thread after the client is gone.
-        for (Future<?> f : pendingExecutions.values()) {
-            f.cancel(true);
-        }
-        pendingExecutions.clear();
-        refs.clear();
-        // Reset transient debug state for the next session. Queue on the
-        // handler executor so these run after any previously-submitted tasks
-        // (e.g. handleSetEntityGlow), preventing stale glow.
-        handlerExecutor.submit(() -> {
-            ClientEntityGlowManager.clear();
-            ClientBlockGlowManager.clear();
-        });
-    }
-
-    @Override
-    public void onMessage(WebSocket conn, String message) {
-        BridgeRequest req;
-        try {
-            req = GSON.fromJson(message, BridgeRequest.class);
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "[DebugBridge] Failed to parse message", e);
-            try {
-                BridgeResponse resp = BridgeResponse.error("unknown", "Invalid JSON: " + e.getMessage());
-                conn.send(GSON.toJson(resp.toJson()));
-            } catch (Exception ignored) {
-            }
-            return;
-        }
-        if (req.id == null || req.id.isEmpty()) {
-            req.id = "req-" + System.nanoTime();
-        }
-        dispatchAsync(req, conn);
-    }
-
-    @Override
-    public void onError(WebSocket conn, Exception ex) {
-        LOG.log(Level.WARNING, "[DebugBridge] WebSocket error", ex);
-        // conn == null means this is a server-level error (e.g., bind failure)
-        if (conn == null
-                && (ex instanceof BindException || (ex.getCause() != null && ex.getCause() instanceof BindException))) {
-            Consumer<Exception> callback = this.bindErrorCallback;
-            if (callback != null) {
-                callback.accept(ex);
-            }
-        }
-    }
-
-    @Override
-    public void onStart() {
-        LOG.info("[DebugBridge] Server started on port " + getPort());
-        Runnable cb = this.startCallback;
-        if (cb != null) {
-            cb.run();
-        }
-    }
-
     private BridgeResponse handleRequest(BridgeRequest req) {
         try {
             return switch (req.type) {
@@ -427,7 +424,8 @@ public class BridgeServer extends WebSocketServer {
             timeoutMs = Math.min(MAX_EXECUTE_TIMEOUT_MS, Math.max(0, requested));
         }
 
-        LuaRuntime.ExecutionResult result = lua.execute(code, timeoutMs);
+        LuaRuntime rt = getLuaRuntime();
+        LuaRuntime.ExecutionResult result = rt.execute(code, timeoutMs);
 
         if (!result.isSuccess()) {
             return BridgeResponse.error(req.id, result.error);
@@ -438,31 +436,6 @@ public class BridgeServer extends WebSocketServer {
             serialized = serializer.serialize(result.returnValue);
         }
         return BridgeResponse.success(req.id, serialized, result.output);
-    }
-
-    /**
-     * Dispatch any request asynchronously on the {@link #handlerExecutor},
-     * freeing the WebSocket IO thread from all blocking work. The response
-     * is sent back on the handler thread once the request completes.
-     * Pending futures are tracked so {@link #onClose} can cancel them.
-     */
-    private void dispatchAsync(BridgeRequest req, WebSocket conn) {
-        final String fId = req.id;
-        Future<?> future = handlerExecutor.submit(() -> {
-            try {
-                BridgeResponse resp = handleRequest(req);
-                conn.send(GSON.toJson(resp.toJson()));
-            } catch (Exception e) {
-                try {
-                    BridgeResponse resp = BridgeResponse.error(fId, "Internal error: " + e.getMessage());
-                    conn.send(GSON.toJson(resp.toJson()));
-                } catch (Exception ignored) {
-                }
-            } finally {
-                pendingExecutions.remove(fId);
-            }
-        });
-        pendingExecutions.put(req.id, future);
     }
 
     private BridgeResponse handleSearch(BridgeRequest req) {
@@ -1168,8 +1141,6 @@ public class BridgeServer extends WebSocketServer {
                     req.id, "Screen inspect failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
-
-    // ==================== Item Registry Handler ====================
 
     private BridgeResponse handleListItems(BridgeRequest req) {
         if (itemRegistryProvider == null) {

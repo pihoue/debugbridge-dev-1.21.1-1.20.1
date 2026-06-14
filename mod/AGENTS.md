@@ -8,22 +8,23 @@
 
 ## Building
 
-**命令行 Gradle** — 必须指定 `workdir = mod/`，否则 settings.gradle.kts 找不到。
-
 ```powershell
-# Build Forge 1.20.1 JAR（用 Bash 工具，设 workdir = mod/）
+# Build Forge 1.20.1 JAR（命令行，必须设 workdir = mod/）
 $env:JAVA_HOME = "C:\Program Files\Java\jdk-21.0.10"
-gradlew.bat :forge-1.20.1:build --console=plain -q
+.\gradlew.bat :forge-1.20.1:build --console=plain -q
 
-# 只运行 spotless 格式化
-gradlew.bat :forge-1.20.1:spotlessApply --console=plain -q
+# Build NeoForge 1.21.1 JAR
+.\gradlew.bat :neoforge-1.21.1:shadowJar --console=plain -q
 
 # 运行客户端
-gradlew.bat :forge-1.20.1:runClient --console=plain
+.\gradlew.bat :forge-1.20.1:runClient --console=plain
+.\gradlew.bat :neoforge-1.21.1:runClient --console=plain
 
-# 也可以用 idea_build_project 进行编译验证
-# 用 idea_execute_run_configuration 运行构建/JAR/客户端
+# 也可以用 idea_build_project / idea_execute_run_configuration
+.\.editor/spotless.gradle :spotlessApply
 ```
+
+> 注意：不同模块使用不同 Gradle 版本（forge = 8.10.2, neoforge = 9.5.1），切换模块前 `gradlew` 会自动下载对应版本。
 
 ## Testing
 
