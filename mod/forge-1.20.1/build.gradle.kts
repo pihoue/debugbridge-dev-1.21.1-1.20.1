@@ -53,6 +53,28 @@ val extractLibs = tasks.register("extractBridgeLibs") {
 }
 tasks.named("classes") { dependsOn(extractLibs) }
 
+// Shadow: produce a clean mod JAR (the jar task inherits the bloated extract output)
+tasks.shadowJar {
+    archiveClassifier.set("")
+    dependencies {
+        include(dependency("org.java-websocket:Java-WebSocket"))
+        include(dependency("org.apache.groovy:groovy"))
+    }
+    // Include web UI assets from the core module
+    from(project(":core").tasks.named("processResources")) {
+        include("webui/**")
+    }
+    exclude("net/minecraft/**")
+    exclude("net/minecraftforge/**")
+    exclude("com/mojang/**")
+    exclude("com/google/gson/**")
+    exclude("cpw/mods/**")
+    exclude("mcp/**")
+    exclude("META-INF/maven/**")
+    exclude("META-INF/jarjar/**")
+    exclude("META-INF/versions/**")
+}
+
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
 
 tasks.processResources {

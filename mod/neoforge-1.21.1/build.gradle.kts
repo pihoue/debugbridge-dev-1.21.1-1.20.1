@@ -39,8 +39,8 @@ configurations.implementation {
 tasks.shadowJar {
     archiveClassifier.set("")
     dependencies {
-        include(dependency("org.java-websocket:Java-WebSocket:.*"))
-        include(dependency("org.apache.groovy:groovy:.*"))
+        include(dependency("org.java-websocket:Java-WebSocket"))
+        include(dependency("org.apache.groovy:groovy"))
         // Gson excluded — NeoForge bundles it already
     }
     // Include the core module's web UI resources
