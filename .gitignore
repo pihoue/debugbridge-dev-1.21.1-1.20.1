@@ -88,3 +88,4 @@ mcp-server/mcpb/
 mcp-server/*.mcpb
 
 docs/superpowers
+/MIGRATION_PLAN.md

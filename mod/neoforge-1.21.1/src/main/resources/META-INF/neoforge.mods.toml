@@ -1,0 +1,26 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="debugbridge"
+version="${version}"
+displayName="DebugBridge (NeoForge 1.21.1)"
+description="WebSocket REPL into the running Minecraft client. Lua-Java bridge with auto-downloaded Mojang mappings."
+authors="Weikeng Chen"
+logoFile="assets/debugbridge/icon.png"
+environment="CLIENT"
+
+[[dependencies.debugbridge]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.21.1,1.21.2)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[dependencies.debugbridge]]
+    modId="neoforge"
+    mandatory=true
+versionRange="[21.1,)"
+
+

@@ -114,16 +114,24 @@ final class RecordingSession {
     /**
      * Block the caller until the session resolves. Mapped exceptions surface
      * the protocol error code.
+     * <p>
+     * A per-frame deadline prevents a silent FrameCapturer drop (e.g. the
+     * sink never fires for the last slot) from hanging the bridge handler
+     * thread forever. The formula {@code frames * 200ms + 30s} gives a
+     * generous ceiling (at 20fps, 6000 frames get ~22 minutes).
      */
     RecordingResult awaitResult() throws RecordingException, InterruptedException {
         try {
-            return future.get();
+            return future.get(req.frames * 200L + 30_000L, TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new RecordingException(
+                    "Recording timed out after " + (req.frames * 200L + 30_000L) + "ms");
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RecordingException re) throw re;
             if (cause instanceof RuntimeException rte) throw rte;
-            throw new RecordingException.IoError(
-                    "unexpected failure: " + (cause == null ? "null" : cause.getMessage()), cause);
+            throw new RecordingException(
+                    "unexpected failure: " + (cause == null ? "null" : cause.getMessage()));
         }
     }
 

@@ -12,6 +12,7 @@ public class SecurityPolicy {
     private static final Set<String> BLOCKED_PREFIXES = Set.of(
             "java.lang.Runtime",
             "java.lang.ProcessBuilder",
+            "java.lang.reflect.",
             "java.net.",
             "java.security.",
             "javax.net.",

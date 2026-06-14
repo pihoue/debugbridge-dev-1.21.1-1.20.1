@@ -1,6 +1,8 @@
 pluginManagement {
     repositories {
-        maven("https://maven.fabricmc.net/")
+        maven("https://maven.minecraftforge.net/")
+        maven("https://maven.neoforged.net/releases/")
+        maven("https://maven.muon.rip/releases")
         gradlePluginPortal()
         mavenCentral()
     }
@@ -9,9 +11,13 @@ pluginManagement {
 rootProject.name = "debugbridge"
 
 include(":core")
-// Fabric modules require Loom plugin + compatible Gradle version.
-// Uncomment when building with Gradle 8.x and Fabric Loom.
-include(":fabric-1.19")
-include(":fabric-1.21.11")
-include(":fabric-26.2-dev")
-// include(":fabric-26.1")
+
+val gradleBase = org.gradle.util.GradleVersion.current().baseVersion
+if (gradleBase < org.gradle.util.GradleVersion.version("9.0")) {
+    if (file("forge-1.20.1/build.gradle.kts").exists() || file("forge-1.20.1/build.gradle").exists()) {
+        include(":forge-1.20.1")
+    }
+}
+if (file("neoforge-1.21.1/build.gradle.kts").exists() || file("neoforge-1.21.1/build.gradle").exists()) {
+    include(":neoforge-1.21.1")
+}

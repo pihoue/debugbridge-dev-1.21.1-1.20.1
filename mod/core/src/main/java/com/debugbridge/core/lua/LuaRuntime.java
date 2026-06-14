@@ -133,6 +133,7 @@ public class LuaRuntime {
     public ExecutionResult execute(String luaCode, long timeoutMs) {
         final long effectiveTimeoutMs = timeoutMs > 0 ? timeoutMs : maxExecutionTimeMs;
         printBuffer.setLength(0);
+        bridge.resetDispatchBudget();
 
         ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(r, "lua-exec");
